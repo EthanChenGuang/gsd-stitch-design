@@ -1,7 +1,7 @@
 ---
 name: gsd-ui-stitch-phase
 description: 项目级全局设计 + 阶段 UI 设计稿。维护全局设计系统 .planning/design/DESIGN.md（可导入用户自带的 DESIGN.md，审查、讨论、完善后锁定），再按阶段跑 /gsd-ui-phase 出 UI-SPEC.md，并在唯一的 Stitch 项目、唯一的设计系统下生成该阶段全部界面（Stitch 文件取不回时改用 html 渲染器），把设计稿（HTML + 截图 + 对照表）写回 phase 目录。项目相关的取值都来自 .planning/design/design-config.json。用于 discuss-phase 之后、plan-phase 之前。
-argument-hint: "[phase] [--design <path>] [--design-only] [--from-screens] [--export-only] [--renderer auto|stitch|html]"
+argument-hint: "[phase] [--design <path>] [--design-only] [--from-screens] [--export-only] [--renderer auto|stitch|html] [--auto]"
 allowed-tools:
   - Read
   - Write
@@ -42,6 +42,10 @@ H. 提交，更新 STATE，提示 `/gsd-plan-phase {N}`
 - `--from-screens`：本阶段的 UI-SPEC 已通过审核，从 C 开始。
 - `--export-only`：界面已定稿，只做 X–H。
 - `--renderer auto|stitch|html`：本次运行的渲染方式，覆盖 design-config.json 的 `renderer`。
+- `--auto`：自动模式，所有提问都取推荐项，见 `<auto_mode>`。GSD 的 plan-phase 流水线以 `{N} --auto [--ws <name>]` 调用本 skill，`/gsd-autonomous` 只传裸的 `{N}`。
+- `--ws <name>`：GSD 工作流名。出现时，下文每一次 `$GSD` 调用都要追加 `--ws <name>`，调用 `gsd-ui-phase` 时也原样传给它。
+
+**自动模式的判定**：带了 `--auto`，或者 `$GSD query config-get workflow.ui_stitch_auto --raw` 输出 `true`。命令出错或输出其他内容都按 false 处理。`/gsd-autonomous` 只传裸的阶段号，所以它下面只有在 `workflow.ui_stitch_auto` 为 true 时才是自动模式，否则本 skill 保持交互。
 
 用户没有带参数，但在对话里附上了一个 DESIGN.md 文件，或者说"用我这个 design.md"：等同于 `--design <该文件>`。
 </arguments>
@@ -54,6 +58,24 @@ H. 提交，更新 STATE，提示 `/gsd-plan-phase {N}`
 - 全局令牌一旦锁定，任何阶段都不能悄悄改。要改只能走 G4「全局变更」。
 - 不要关闭证书校验（不用 `curl -k`、不设 `NODE_TLS_REJECT_UNAUTHORIZED=0`）。
 </conventions>
+
+<auto_mode>
+作为 GSD 钩子（`plan:pre` 步骤）在流水线里运行时，不能卡在提问上。自动模式不调用 AskUserQuestion，每处都取标为「推荐」的选项；交互模式的所有提问和行为保持不变。
+
+| 位置 | 自动模式怎么做 |
+|---|---|
+| 0 配置 | `design-config.json` 不存在或必填项为空：产品事实不能编造，也没有推荐项。给出警告，写明文件和缺哪些字段，然后正常结束（不报错） |
+| 路由 / 全局设计 | 全局 DESIGN.md 不存在或不是 `status: locked`：警告「全局设计需要用户参与，请运行 `/gsd-ui-stitch-phase --design-only`」，本次跳过界面生成，流水线继续，正常结束，绝不报错。自动模式下的 `--design` / `--design-only` 同样处理 |
+| G1–G5 | 自动模式下永远不执行 |
+| A | 仅在没有 UI-SPEC 时执行，用 `gsd-ui-phase` 的 `{N} --auto` 调用 |
+| B' | 把 UI-SPEC 的令牌值改回全局值，绝不走 G4（见 B' 的钩子入口一段） |
+| C | 取「清单没问题，开始生成」 |
+| E1 渲染方式 | `renderer` 为 `auto`，Stitch 工具缺失或文件取不回：改用 html 渲染器。`renderer` 明确为 `stitch` 而 Stitch 不可用：警告并正常结束，不生成界面（这是用户明确的选择） |
+| E1 样板 | Stitch 或 html 的样板直接进入 E2 批量，不做 SendUserFile 确认 |
+| F | 跳过 |
+| X | 下载链接 401/403：其余界面改用 html 渲染器（推荐项）。X 和 H 照常执行 |
+| 其他 AskUserQuestion | 取标为「推荐」的选项；没有推荐项时给出警告并正常结束 |
+</auto_mode>
 
 <config>
 `.planning/design/design-config.json` 的字段（模板在本 skill 所属 pack 的 `templates/design-config.json`，每个字段有 `_comment` 说明）：
@@ -123,6 +145,8 @@ ls .planning/design/DESIGN.md .planning/design/stitch.json .planning/design/desi
 
 找不到 GSD 时停止，并告诉用户安装方式。Bash 的每次调用都是新的 shell，变量不会保留：后面用到 `$GSD`、`$SKILL_DIR` 时，在同一条命令里重新解析，或直接写入绝对路径。
 
+**自动模式与分支**：自动模式或钩子入口下不新建也不切换分支，由调用它的 GSD 流水线管理分支，直接提交在当前分支上。
+
 **读取配置**：读 `.planning/design/design-config.json`。
 
 - 文件不存在，或任一必填项（`product_name`、`product_pitch`、`audience`、`ui_language`）为空：用 AskUserQuestion 询问这些必填项，再问 `content_language`（界面里是否展示另一种语言的内容；不展示就是 null）和 `device`。写出**完整**的 design-config.json（所有字段都在，其余字段用 <config> 表里的默认值；`_comment` 说明可从 pack 的模板复制）。
@@ -148,12 +172,13 @@ if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 - `renderer` 为 `auto`：继续；到 E1 时提供 html 渲染器。
 - `renderer` 为 `html`：不需要 Stitch。
 
-如果当前是 detached HEAD 或默认分支，先建分支（如 `design/phase-{NN}-screens` 或 `design/global`），再开始会提交的步骤。
+如果当前是 detached HEAD 或默认分支，先建分支（如 `design/phase-{NN}-screens` 或 `design/global`），再开始会提交的步骤（自动模式和钩子入口除外，见上文）。
 
 **路由**（按顺序判断，命中第一条就走）：
 
 | 情况 | 走哪里 |
 |---|---|
+| 给了阶段号，没有 `--design`、`--design-only`、`--export-only`，`{PD}/{NN}-UI-SPEC.md` 已存在而 `{PD}/{NN}-SCREENS.md` 不存在 | **钩子入口**：GSD 自己的 ui-phase 刚跑完，它没有读到全局 DESIGN.md。跳过 A。全局 DESIGN.md 已锁定时：做全局前置检查，再做 B'（此处必做），然后从 C 继续。DESIGN.md 不存在或未锁定时：自动模式给出警告并正常结束（见 `<auto_mode>`）；交互模式落到最后一行「全局 DESIGN.md 不存在」，其中「从本阶段的 UI-SPEC 生成全局设计」因为 UI-SPEC 已存在而跳过 A，直接走 G5 |
 | 带了 `--design`，或用户附上了 DESIGN.md | G1 导入审查 → G2 讨论完善 → G3 锁定同步 → 有阶段就接着走 A |
 | `--design-only` 且全局 DESIGN.md 已存在 | 问用户要改什么 → G4 全局变更 |
 | `--export-only` | X |
@@ -297,9 +322,9 @@ updated: YYYY-MM-DD
 
 ## A–B. UI-SPEC（GSD 原生）
 
-带 `--from-screens` 或 `--export-only` 时跳过本步。
+带 `--from-screens` 或 `--export-only` 时跳过本步；钩子入口（UI-SPEC 已存在、SCREENS.md 不存在）也跳过本步，直接做 B'。
 
-用 Skill 工具调用 `gsd-ui-phase`，参数是阶段号，完整执行它的工作流，保留全部检查点。**补充两处**：
+用 Skill 工具调用 `gsd-ui-phase`，参数是阶段号（自动模式下是 `{N} --auto`，有 `--ws` 时一并传入），完整执行它的工作流，保留全部检查点。**补充两处**：
 
 1. 在第 5 步构建 gsd-ui-researcher 的 prompt 时（第 9 步修订时也一样），在 `<required_reading>` 里加上：
    ```
@@ -328,6 +353,10 @@ rm -rf "$TMPD"
 字体族名、字号刻度、间距刻度也要人工对照一遍。发现不一致或「Proposed global additions」时，用 AskUserQuestion 让用户选：「UI-SPEC 改回全局值」（推荐）/「把它作为新令牌加入全局设计」→ 走 G4。处理完才能进入 C。
 
 建立模式下，B 之后先走 G5。
+
+**钩子入口的 B'**：从 GSD 钩子进来时，UI-SPEC 是 GSD 自己的 ui-phase 在没有读到全局 DESIGN.md 的情况下写出的，所以颜色、字体族、字号刻度、间距的数值很可能与全局设计不一致，每一条「Proposed global additions」也都要处理。
+- 交互模式：沿用上面的两选项提问（「UI-SPEC 改回全局值」推荐 / 「作为新令牌加入全局设计」走 G4）。
+- 自动模式：把 Design System、Spacing、Typography、Color 几节里每个不一致的令牌值改写成全局值，并在每张令牌表上方加一句「数值来源：`.planning/design/DESIGN.md` v{version}」（做法同 G5 第 3 步）。Checker Sign-Off 不动。把每处改动记成「旧值 → 新值」，连同每条 Proposed global addition 一起留给 H 的汇报，**绝不进入 G4**。
 
 ## C. 界面清单 → `{NN}-SCREENS.md`
 
@@ -514,6 +543,22 @@ Phase {N}: {phase_name}
 下一步：/clear 然后 /gsd-plan-phase {N}
 ```
 
+**自动模式或钩子入口的汇报**（替换上面的模板）：
+
+```
+### GSD ► UI 设计稿完成（自动模式）
+
+Phase {N}: {phase_name}
+全局设计：v{version}
+渲染方式：{renderer}
+B' 改写（旧值 → 新值）：{逐条列出；没有写「无」}
+Proposed global additions：{逐条列出；它们需要之后运行 /gsd-ui-stitch-phase --design-only 走 G4，没有写「无」}
+未采纳的 Stitch output_components 建议：{逐条列出；没有写「无」}
+设计稿：{PD}/design/
+
+控制权交还给调用它的 GSD 流程，由它继续规划。
+```
+
 </process>
 
 <resume>
@@ -525,6 +570,7 @@ Phase {N}: {phase_name}
 - 本阶段 `design/tokens.css` 的版本头落后于 DESIGN.md → 按 E-html 第 1 步重新生成并重新截图
 - 本阶段 manifest 里有界面还没生成（Stitch 缺 `stitch_screen_id`，html 缺 `.html` 文件） → E2，只生成缺的界面
 - 全部 `generated`，有的不是 `exported` → `--export-only`
+- UI-SPEC 存在而 SCREENS.md 不存在（GSD 钩子入口） → 跳过 A，做 B'，然后从 C 继续
 </resume>
 
 <success_criteria>
@@ -537,4 +583,5 @@ Phase {N}: {phase_name}
 - [ ] 令牌层面的修改都走了 G4，并留有 `DESIGN-CHANGE-v{n}.md`
 - [ ] manifest 记录了 `renderer`；每个界面都有 html（能拿到时也有 png），manifest 完整；UI-SPEC 末尾有 Screen Designs 一节
 - [ ] 已提交（commit_docs 为 true 时），STATE 已更新
+- 自动模式下，上面标「经用户确认」的项由推荐选项加最终汇报满足；DESIGN.md 未锁定等情况只警告并正常结束，不算失败
 </success_criteria>

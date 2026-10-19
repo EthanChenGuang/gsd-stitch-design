@@ -1,6 +1,6 @@
 # gsd-stitch-design
 
-给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.0.0），变更记录见 `CHANGELOG.md`。
+给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.1.0），变更记录见 `CHANGELOG.md`。
 
 ## 这是什么
 
@@ -58,6 +58,8 @@ bash /tmp/gsd-stitch-src/tools/gsd-stitch-design/install.sh /path/to/project
 | `.claude/CLAUDE.md`（没有就用根目录 `CLAUDE.md`，都没有就新建 `.claude/CLAUDE.md`） | 插入或更新一段 `<!-- gsd-stitch-design:start -->` 到 `<!-- gsd-stitch-design:end -->` 之间的「UI Design Workflow」说明，标记之外的内容不动。 |
 | `.planning/config.json` | 把 `workflow.ui_phase` 设为 `true`，其他键保持不变；文件不存在或不是合法 JSON 时只给出警告。 |
 | `.claude/skills/.gsd-stitch-design-version` | 写入包的版本号。 |
+| `.gsd/capabilities/ui-stitch/capability.json`、`.gsd-capabilities.json` | 由 GSD 命令行（`capability install`）写入：注册 GSD 能力 `ui-stitch`，详见「接入 /gsd-autonomous」。需要 `.planning/` 和 GSD；缺少时只警告。用 `--no-autonomous` 可以不注册。 |
+| `$GSD_HOME/.gsd/consent.json`（`GSD_HOME` 默认是 `~`，在项目之外） | 本机的授权记录，按项目绝对路径记录，不属于项目，不要提交。 |
 
 ### 参数与退出码
 
@@ -65,10 +67,12 @@ bash /tmp/gsd-stitch-src/tools/gsd-stitch-design/install.sh /path/to/project
 |---|---|
 | `--dry-run` | 只打印要做的事（每行以 `[dry-run] ` 开头），不改任何文件 |
 | `--force` | 允许覆盖与包内不同的已安装 skill 文件（本地修改会丢失） |
-| `--uninstall` | 卸载，见下文 |
+| `--uninstall` | 卸载，见下文（同时移除能力注册） |
+| `--no-autonomous` | 安装 skill，但不注册 GSD 能力 `ui-stitch` |
+| `--register-only` | 只（重新）注册 GSD 能力 `ui-stitch`，用于新机器或云端会话；不复制 skill，不改 CLAUDE.md、`.planning/config.json` 和版本文件。不能与 `--uninstall`、`--no-autonomous` 同用（退出码 2）；`--force` 被忽略 |
 | `-h`、`--help` | 显示用法 |
 
-输出行前缀：`+` 新建，`~` 更新，`=` 无变化，`-` 删除，`WARN:` 警告，`CONFLICT:` 冲突文件。退出码：0 成功，1 出错（目标不是目录、没有 node、标记不成对等），2 用法错误，3 因冲突拒绝。
+输出行前缀：`+` 新建，`~` 更新，`=` 无变化，`-` 删除，`WARN:` 警告，`CONFLICT:` 冲突文件。退出码：0 成功，1 出错（目标不是目录、没有 node、标记不成对等），2 用法错误，3 因冲突拒绝。能力注册出任何问题（没有 GSD、没有 `.planning/`、注册命令失败）都只打印 `WARN:` 和一行重新注册命令，退出码仍是 0。
 
 ## 配置
 
@@ -116,6 +120,8 @@ verify
 
 要点：全局设计（G 步）只在项目里做一次；之后每个前端阶段只跑 A 到 H。
 
+自动模式下（`/gsd-autonomous`、`/gsd-plan-phase --auto`），这一步不用手动运行：它作为 `plan:pre` 钩子在 `gsd-ui-phase` 之后自动运行，见「接入 /gsd-autonomous」。
+
 ## 全局设计启动的两条路径
 
 1. **挑选模板**：运行 `/gsd-ui-design-pick`。它先写设计简报（`DESIGN-BRIEF.md`），拉取 awesome-design-md，初筛、打分，生成并排预览页，你选定一份或混搭，保存为 `.planning/design/candidates/{id}-DESIGN.md`，再自动交给 `/gsd-ui-stitch-phase --design-only --design <候选>` 去审查、去品牌化、锁定。参数：`--refresh`、`--top <n>`、`--direction "<风格描述>"`、`--no-handoff`。
@@ -152,11 +158,81 @@ verify
 
 ## 和 GSD 原生行为的冲突点
 
-- `/gsd-autonomous` 通过 GSD 自己的 `plan:pre` 钩子调用 `gsd-ui-phase`，**不会**应用「用 ui-stitch-phase 替代」的规则。前端阶段要先手动运行 `/gsd-ui-stitch-phase {N}`，再进入自动模式。
+- `/gsd-autonomous` 通过 GSD 自己的 `plan:pre` 钩子调用 `gsd-ui-phase`，不会应用「用 ui-stitch-phase 替代」的规则。安装器注册的 GSD 能力会让它在 `gsd-ui-phase` 之后再运行 `gsd-ui-stitch-phase`，见下一节。
 - 直接输入 `/gsd-ui-phase` 时，Claude 会先问你：要完整的 `/gsd-ui-stitch-phase` 流程，还是只要 UI-SPEC。
 - 令牌（颜色、字体、间距、圆角、阴影、动效）锁定后不能在阶段里悄悄改，只能走 G4，并留下 `.planning/design/DESIGN-CHANGE-v{n}.md`。
 - `workflow.ui_phase` 必须保持 `true`，否则 `/gsd-ui-phase` 会提前退出，`/gsd-ui-stitch-phase` 也就跑不起来。安装器会帮你设置。
 - 设计稿如何回到后续流程：每阶段的 `design/manifest.json` 记录界面与文件；UI-SPEC 末尾的 `## Screen Designs` 列出设计稿；安装进 CLAUDE.md 的那一段要求规划者在任务里引用相关界面、执行者对照截图实现。
+
+## 接入 /gsd-autonomous
+
+安装器会把这个包注册成 GSD 的项目能力 `ui-stitch`（文件是 `.gsd/capabilities/ui-stitch/capability.json`）。它包含两样东西：一个 `plan:pre` 步骤，在 GSD 自己的 `gsd-ui-phase` 之后调用 `gsd-ui-stitch-phase`（产出 `SCREENS.md`，依赖 `UI-SPEC.md`）；一条给规划者的补充说明，要求它引用阶段 `design/` 里的界面设计稿。
+
+| 情形 | 会发生什么 |
+|---|---|
+| 没有注册 | 原来的 GSD 流程，不运行 `gsd-ui-stitch-phase` |
+| `/gsd-autonomous` | 前端阶段运行本 skill。GSD 传的是裸阶段号，没有 `--auto`，所以保持交互；只有 `workflow.ui_stitch_auto=true` 时才是自动模式 |
+| `/gsd-plan-phase --auto` | 前端阶段运行本 skill，GSD 传 `{N} --auto`，自动模式 |
+| 交互式 `/gsd-plan-phase` 且没有 UI-SPEC | GSD 推荐 `/gsd-ui-phase`，CLAUDE.md 里的规则把它改成 `/gsd-ui-stitch-phase`（完整流程） |
+| UI-SPEC 已由手动运行 `/gsd-ui-stitch-phase` 生成 | 跳过：GSD 看到 UI-SPEC 已存在，不会再派发 UI 钩子 |
+| 非前端阶段 | 不受影响 |
+| 已注册但 `workflow.ui_stitch=false` | 钩子和规划者补充说明都不生效 |
+
+**钩子入口怎么工作**：GSD 先运行自己的 `gsd-ui-phase`，此时它读不到全局 DESIGN.md，写出 UI-SPEC。接着本 skill 发现「UI-SPEC 存在而 SCREENS.md 不存在」，就跳过 A，做 B'（把 UI-SPEC 里和全局设计不一致的令牌值改回全局值，并处理 Proposed global additions），然后从 C 继续：界面清单、生成、导出。
+
+**规划者补充说明**，用大白话说：如果阶段目录里有 `design/` 和 `SCREENS.md`，规划者要在任务里引用相关界面，令牌取自 `.planning/design/DESIGN.md`，文案和状态取自 UI-SPEC，不要另造与设计稿矛盾的布局。补充说明只会进入规划者的 prompt。
+
+**怎么关闭**（三选一）：
+
+```bash
+node .claude/gsd-core/bin/gsd-tools.cjs config-set workflow.ui_stitch false           # 保留注册，钩子不再运行
+node .claude/gsd-core/bin/gsd-tools.cjs capability remove ui-stitch --scope project   # 移除注册
+bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall                  # 连同 skill 一起卸载
+```
+
+**授权记录按机器保存**：GSD 只在本机有授权记录时才启用项目能力。记录在 `$GSD_HOME/.gsd/consent.json`（`GSD_HOME` 默认是 `~`），按项目的绝对路径记录。所以换新机器、开云端会话、或把项目目录挪了位置之后，项目里虽然有 `.gsd/capabilities/ui-stitch/capability.json`，能力却是未启用状态，GSD 悄悄地只运行自己的 ui 步骤。这时重新注册一次：
+
+```bash
+bash /path/to/gsd-stitch-design/install.sh /path/to/project --register-only
+```
+
+**该提交哪些文件**：`.gsd/capabilities/ui-stitch/capability.json` 和 `.gsd-capabilities.json` 要提交，后者是 `capability remove` 需要的登记册。注意登记册里的 `source` 字段记着本机的 pack 路径，这只是本地路径，不含密钥。`consent.json` 在项目之外，不要提交。
+
+**可选：SessionStart 钩子**。云端会话里自动重新注册，在 `.claude/settings.json` 里加（路径换成你的 pack 位置）。已启用时它什么都不做，所以不会反复改写登记册：
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f /path/to/gsd-stitch-design/install.sh ] && bash /path/to/gsd-stitch-design/install.sh \"$CLAUDE_PROJECT_DIR\" --register-only || true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+没有 pack 的机器可以用不依赖 pack 的退路：把已提交的 `capability.json` 复制到临时目录再安装，然后删掉临时目录。
+
+```bash
+T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
+  && node .claude/gsd-core/bin/gsd-tools.cjs capability install "$T" --scope project --yes; rm -rf "$T"
+```
+
+这条退路会对仓库里当前提交的那份 manifest 重新授权，所以对 `.gsd/capabilities/ui-stitch/capability.json` 的改动要像审查任何指令文件一样审查（它里面的补充说明会原样进入规划者的 prompt）。不能直接从 `.gsd/capabilities/ui-stitch` 目录本身安装（会失败）。
+
+**已知限制**（有依据的）：
+
+1. 重复产出者规则：GSD 自带的 `ui` 能力已经在 `plan:pre` 产出 `UI-SPEC.md`，所以本步骤只能产出 `SCREENS.md`，不能取代 `gsd-ui-phase`。这就是为什么 GSD 的 ui-phase 先运行（读不到全局 DESIGN.md），再由 B' 改写令牌。
+2. 补充说明只会进入规划者，不会进入 `gsd-ui-researcher`，所以钩子路径上无法把 DESIGN.md 注入 GSD 自己的 UI-SPEC 研究。
+3. 步骤配置了 `onError: skip`：本 skill 出错不会阻塞规划。
+
+**`workflow.ui_stitch_auto`**（默认 `false`）：为 true，或调用时带 `--auto`，就进入自动模式。自动模式不提问，每个提问取推荐项；不执行 G1 到 G5，不走 G4；全局 DESIGN.md 不存在或没锁定时只警告（提示运行 `/gsd-ui-stitch-phase --design-only`）并正常结束；`design-config.json` 缺必填项时同样警告后正常结束。自动模式不会替你锁定全局设计，也不会改全局令牌。
 
 ## 渲染方式：stitch 还是 html
 
@@ -189,7 +265,7 @@ bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall --dry-run  
 bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall
 ```
 
-会删除：两个 skill 目录、`CLAUDE.md` 里标记之间的那一段（连同它前面的一个空行，所以安装再卸载后文件内容和原来逐字节一致；删完变成空文件就一并删除）、版本文件。
+会删除：GSD 能力注册（执行 `capability remove ui-stitch`，同时删掉 `.gsd/capabilities/ui-stitch` 和本机授权记录；`.gsd-capabilities.json` 文件保留，其中的 entries 变成空对象）、两个 skill 目录、`CLAUDE.md` 里标记之间的那一段（连同它前面的一个空行，所以安装再卸载后文件内容和原来逐字节一致；删完变成空文件就一并删除）、版本文件。
 
 不会动：`.planning/design/`（包括 design-config.json 和你的 DESIGN.md）、`.planning/config.json` 里的 `workflow.ui_phase`。
 
@@ -197,7 +273,7 @@ bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall
 
 1. 取得新版本的包（再次克隆，或更新你已有的副本），读 `CHANGELOG.md`。
 2. 先预览：`bash tools/gsd-stitch-design/install.sh /path/to/project --dry-run`。
-3. 重新运行安装。如果你改过已安装的 skill 文件，会看到 `CONFLICT:` 并以退出码 3 拒绝；确认可以丢弃本地修改时加 `--force`。
+3. 重新运行安装。重新安装会重新注册能力（版本升级也一样处理，`capability.json` 里的 `version` 跟随 `VERSION`；已启用且内容相同时什么都不改）。如果你改过已安装的 skill 文件，会看到 `CONFLICT:` 并以退出码 3 拒绝；确认可以丢弃本地修改时加 `--force`。
 4. 已安装的版本号在 `.claude/skills/.gsd-stitch-design-version`。
 5. `design-config.json` 永远不会被覆盖：新版本加了字段时，把 `templates/design-config.json` 与你的文件对一下，手工补上。
 6. 想确认包本身没问题，运行自检：`bash tools/gsd-stitch-design/test/install.test.sh`，最后一行应为 `ALL TESTS PASSED`。
