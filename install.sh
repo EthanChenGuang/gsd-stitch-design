@@ -1,22 +1,33 @@
 #!/usr/bin/env bash
 # gsd-stitch-design installer.
 # Installs the gsd-ui-stitch-phase and gsd-ui-design-pick skills into another GSD project.
+# It also registers the GSD project capability ui-stitch, so /gsd-autonomous and
+# /gsd-plan-phase --auto run gsd-ui-stitch-phase after gsd-ui-phase.
 # Usage: install.sh <target-project-dir> [--dry-run] [--force] [--uninstall]
+#                   [--no-autonomous | --register-only]
 set -euo pipefail
 
 USAGE="Usage: install.sh <target-project-dir> [--dry-run] [--force] [--uninstall]
+                          [--no-autonomous | --register-only]
 
-  --dry-run    print what would happen, change nothing
-  --force      overwrite installed skill files that differ from the pack
-  --uninstall  remove the two skills, the CLAUDE.md block and the version file
-               (.planning/design and workflow.ui_phase are left as-is)
-  -h, --help   show this help
+  --dry-run         print what would happen, change nothing
+  --force           overwrite installed skill files that differ from the pack
+                    (ignored with --register-only)
+  --uninstall       remove the two skills, the CLAUDE.md block, the version file
+                    and the GSD capability registration
+                    (.planning/design and workflow.ui_phase are left as-is)
+  --no-autonomous   do not register the GSD capability ui-stitch
+  --register-only   only (re)register the GSD capability ui-stitch (new machine /
+                    cloud session); copies and edits nothing else
+  -h, --help        show this help
 
 Exit codes: 0 ok, 1 error, 2 usage error, 3 refused because of conflicts"
 
 DRY=0
 FORCE=0
 UNINSTALL=0
+NO_AUTO=0
+REGISTER_ONLY=0
 TARGET_ARG=""
 
 while [ $# -gt 0 ]; do
@@ -24,6 +35,8 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1 ;;
     --force) FORCE=1 ;;
     --uninstall) UNINSTALL=1 ;;
+    --no-autonomous) NO_AUTO=1 ;;
+    --register-only) REGISTER_ONLY=1 ;;
     -h|--help) printf '%s\n' "$USAGE"; exit 0 ;;
     -*) printf 'Unknown option: %s\n%s\n' "$1" "$USAGE" >&2; exit 2 ;;
     *)
@@ -39,6 +52,15 @@ done
 
 if [ -z "$TARGET_ARG" ]; then
   printf '%s\n' "$USAGE" >&2
+  exit 2
+fi
+
+if [ "$REGISTER_ONLY" -eq 1 ] && [ "$UNINSTALL" -eq 1 ]; then
+  printf '%s\n%s\n' "--register-only cannot be combined with --uninstall." "$USAGE" >&2
+  exit 2
+fi
+if [ "$REGISTER_ONLY" -eq 1 ] && [ "$NO_AUTO" -eq 1 ]; then
+  printf '%s\n%s\n' "--register-only cannot be combined with --no-autonomous." "$USAGE" >&2
   exit 2
 fi
 
@@ -71,6 +93,10 @@ VERSION_REL=".claude/skills/.gsd-stitch-design-version"
 DESIGN_CONFIG_REL=".planning/design/design-config.json"
 CLAUDE_CANDIDATES_REL=".claude/CLAUDE.md CLAUDE.md"
 PACK_VERSION="$(tr -d '[:space:]' < "$PACK_DIR/VERSION")"
+CAP_ID="ui-stitch"
+CAP_SRC="$PACK_DIR/capability/ui-stitch"
+CAP_STAGED_REL=".gsd/capabilities/ui-stitch"
+LEDGER_REL=".gsd-capabilities.json"
 
 # ---------------------------------------------------------------------------
 # node helpers (paths and content are passed as argv, never interpolated)
@@ -193,11 +219,161 @@ say('~ .planning/config.json (workflow.ui_phase set to true)');
 EOF
 )
 
+CAP_ACTIVE_JS=$(cat <<'EOF'
+// argv: capabilityId listJson. Exit 0 when the capability is listed with status "active", else 1.
+const [id, raw] = process.argv.slice(1);
+let list;
+try {
+  list = JSON.parse(raw);
+} catch (e) {
+  process.exit(1);
+}
+const hit = Array.isArray(list) && list.some((e) => e && e.id === id && e.status === 'active');
+process.exit(hit ? 0 : 1);
+EOF
+)
+
+# ---------------------------------------------------------------------------
+# GSD capability registration
+# ---------------------------------------------------------------------------
+
+RESULT=""      # registered | active | skipped | failed (set by register_capability)
+GSD_TOOLS=""
+
+# resolve_gsd_tools: project copy first, then $HOME. No PATH lookup.
+resolve_gsd_tools() {
+  GSD_TOOLS=""
+  if [ -f "$TARGET/.claude/gsd-core/bin/gsd-tools.cjs" ]; then
+    GSD_TOOLS="$TARGET/.claude/gsd-core/bin/gsd-tools.cjs"
+  elif [ -f "${HOME:-/nonexistent}/.claude/gsd-core/bin/gsd-tools.cjs" ]; then
+    GSD_TOOLS="$HOME/.claude/gsd-core/bin/gsd-tools.cjs"
+  fi
+}
+
+# first_line <text>: first non-empty line of text.
+first_line() {
+  printf '%s\n' "$1" | grep -m1 . || true
+}
+
+print_reregister_hint() {
+  printf 'Re-register on another machine / cloud session: bash %q %q --register-only\n' "$PACK_DIR/install.sh" "$TARGET"
+}
+
+# register_capability: never fails the script; sets RESULT.
+register_capability() {
+  RESULT=""
+  if [ "$NO_AUTO" -eq 1 ]; then
+    RESULT="skipped"
+    printf '= capability %s (registration skipped, --no-autonomous)\n' "$CAP_ID"
+    return 0
+  fi
+  resolve_gsd_tools
+  if [ -z "$GSD_TOOLS" ]; then
+    RESULT="failed"
+    printf 'WARN: GSD gsd-tools.cjs not found; GSD capability %s not registered (/gsd-autonomous will not run gsd-ui-stitch-phase).\n' "$CAP_ID"
+    return 0
+  fi
+  if [ ! -d "$TARGET/.planning" ]; then
+    RESULT="failed"
+    printf 'WARN: %s has no .planning/ directory; GSD capability %s needs a GSD project root. Rerun after /gsd-new-project.\n' "$TARGET" "$CAP_ID"
+    return 0
+  fi
+  if [ "$DRY" -eq 1 ]; then
+    printf '%swould run: node %s capability install %s --scope project --yes --project-dir %s\n' "$DRY_PREFIX" "$GSD_TOOLS" "$CAP_SRC" "$TARGET"
+    return 0
+  fi
+
+  local staged="$TARGET/$CAP_STAGED_REL/capability.json" had_staged=0 list_json="" out="" rc=0 errf="" err=""
+  [ -f "$staged" ] && had_staged=1
+  if [ "$had_staged" -eq 1 ] && cmp -s "$CAP_SRC/capability.json" "$staged"; then
+    list_json="$(node "$GSD_TOOLS" capability list --project-dir "$TARGET" 2>/dev/null || true)"
+    if [ -n "$list_json" ] && node -e "$CAP_ACTIVE_JS" "$CAP_ID" "$list_json" 2>/dev/null; then
+      RESULT="active"
+      printf '= capability %s (registered, active)\n' "$CAP_ID"
+      return 0
+    fi
+  fi
+
+  errf="$(mktemp "${TMPDIR:-/tmp}/gsd-sd-cap.XXXXXX")"
+  out="$( cd "$TARGET" && node "$GSD_TOOLS" capability install "$CAP_SRC" --scope project --yes --project-dir "$TARGET" --pick status 2>"$errf" )" || rc=$?
+  err="$(cat "$errf" 2>/dev/null || true)"
+  rm -f "$errf"
+  out="$(printf '%s' "$out" | tr -d '[:space:]')"
+  if [ "$rc" -eq 0 ] && [ "$out" = "installed" ]; then
+    if [ "$had_staged" -eq 1 ]; then
+      RESULT="registered"
+      printf '~ capability %s re-registered (project scope)\n' "$CAP_ID"
+    else
+      RESULT="registered"
+      printf '+ capability %s registered (project scope)\n' "$CAP_ID"
+    fi
+  else
+    RESULT="failed"
+    local why
+    why="$(first_line "$err")"
+    [ -n "$why" ] || why="$out"
+    printf 'WARN: could not register GSD capability %s: %s\n' "$CAP_ID" "$why"
+  fi
+  return 0
+}
+
+# unregister_capability: remove the project-scope registration (uninstall).
+unregister_capability() {
+  if [ ! -d "$TARGET/$CAP_STAGED_REL" ]; then
+    printf '= capability %s (not registered)\n' "$CAP_ID"
+    return 0
+  fi
+  resolve_gsd_tools
+  if [ -z "$GSD_TOOLS" ]; then
+    printf 'WARN: GSD gsd-tools.cjs not found; remove the capability by hand: delete %s and the %s entry in %s.\n' "$CAP_STAGED_REL" "$CAP_ID" "$LEDGER_REL"
+    return 0
+  fi
+  if [ "$DRY" -eq 1 ]; then
+    printf '%swould run: node %s capability remove %s --scope project --project-dir %s\n' "$DRY_PREFIX" "$GSD_TOOLS" "$CAP_ID" "$TARGET"
+    return 0
+  fi
+  local out="" rc=0 errf="" err=""
+  errf="$(mktemp "${TMPDIR:-/tmp}/gsd-sd-cap.XXXXXX")"
+  out="$( cd "$TARGET" && node "$GSD_TOOLS" capability remove "$CAP_ID" --scope project --project-dir "$TARGET" --pick status 2>"$errf" )" || rc=$?
+  err="$(cat "$errf" 2>/dev/null || true)"
+  rm -f "$errf"
+  out="$(printf '%s' "$out" | tr -d '[:space:]')"
+  if [ "$rc" -eq 0 ] && [ "$out" = "removed" ]; then
+    printf -- '- capability %s (registration removed)\n' "$CAP_ID"
+  elif [ "$rc" -ne 0 ] && printf '%s' "$err" | grep -qF 'not installed'; then
+    printf '= capability %s (not registered)\n' "$CAP_ID"
+  else
+    local why
+    why="$(first_line "$err")"
+    [ -n "$why" ] || why="$out"
+    printf 'WARN: could not remove GSD capability %s (%s). Clean up by hand: delete %s and the %s entry in %s.\n' "$CAP_ID" "$why" "$CAP_STAGED_REL" "$CAP_ID" "$LEDGER_REL"
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# register-only
+# ---------------------------------------------------------------------------
+
+if [ "$REGISTER_ONLY" -eq 1 ]; then
+  if [ ! -f "$TARGET/$SKILLS_REL/gsd-ui-stitch-phase/SKILL.md" ] && [ ! -f "${HOME:-/nonexistent}/$SKILLS_REL/gsd-ui-stitch-phase/SKILL.md" ]; then
+    printf 'WARN: skill gsd-ui-stitch-phase is not installed in %s/%s or in $HOME; the hook would dispatch a missing skill. Registering anyway; run install.sh without --register-only to install the skills.\n' "$TARGET" "$SKILLS_REL"
+  fi
+  register_capability
+  print_reregister_hint
+  if [ "$DRY" -eq 1 ]; then
+    printf '[dry-run] 未做任何改动。\n'
+  fi
+  exit 0
+fi
+
 # ---------------------------------------------------------------------------
 # uninstall
 # ---------------------------------------------------------------------------
 
 if [ "$UNINSTALL" -eq 1 ]; then
+  unregister_capability
+
   for name in $SKILL_NAMES; do
     p="$TARGET/$SKILLS_REL/$name"
     if [ -d "$p" ]; then
@@ -218,7 +394,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
     act "= $VERSION_REL (not present)"
   fi
 
-  printf 'NOTE: .planning/design and workflow.ui_phase in .planning/config.json were left as-is.\n'
+  printf 'NOTE: .planning/design and workflow.ui_phase in .planning/config.json were left as-is; %s is kept (GSD leaves the file with an empty entries object).\n' "$LEDGER_REL"
   exit 0
 fi
 
@@ -316,10 +492,26 @@ else
   act "+ $VERSION_REL ($PACK_VERSION)"
 fi
 
+# GSD capability.
+register_capability
+
 if [ "$DRY" -eq 1 ]; then
   printf '[dry-run] 未做任何改动。\n'
   exit 0
 fi
+
+case "$RESULT" in
+  registered|active)
+    STEP5="  5. GSD 能力 ui-stitch 已注册：/gsd-autonomous 和 /gsd-plan-phase --auto 现在会在前端阶段的 gsd-ui-phase 之后自动运行 gsd-ui-stitch-phase。
+     请把 .gsd/capabilities/ui-stitch/capability.json 和 .gsd-capabilities.json 提交进仓库（后者是 capability remove 所需的登记册，其 source 字段记录本机的 pack 路径）。
+     授权记录（consent）保存在 \${GSD_HOME:-\$HOME}/.gsd/consent.json，按机器、按项目绝对路径记录，不要提交。换新机器、云端会话或移动项目目录后，需要再运行一次下面的重新注册命令。
+     关闭：把 workflow.ui_stitch 设为 false。"
+    ;;
+  *)
+    STEP5="  5. GSD 能力 ui-stitch 未注册，/gsd-autonomous 暂不会自动运行 gsd-ui-stitch-phase（原因见上方输出；--no-autonomous 是有意跳过）。
+     要启用时，运行下面的重新注册命令。"
+    ;;
+esac
 
 cat <<EOF
 
@@ -327,5 +519,11 @@ cat <<EOF
   1. 编辑 .planning/design/design-config.json，至少填写 product_name、product_pitch、audience、ui_language。
   2. 可选：连接 Google Stitch MCP（renderer 设为 html 时不需要，也能完整使用）。
   3. 开始全局设计：/gsd-ui-design-pick（挑选模板），或 /gsd-ui-stitch-phase --design-only --design <你的 DESIGN.md>。
-  4. 之后每个前端阶段：discuss-phase -> /gsd-ui-stitch-phase {N} -> plan-phase。
+  4. 之后每个前端阶段：discuss-phase -> /gsd-ui-stitch-phase {N} -> plan-phase（自动模式下这一步由 plan:pre 钩子自动运行）。
+$STEP5
+
 EOF
+print_reregister_hint
+if [ "$RESULT" = "skipped" ]; then
+  printf '已用 --no-autonomous 跳过注册。要移除已有注册：install.sh <目录> --uninstall，或 node <gsd-tools> capability remove ui-stitch --scope project。\n'
+fi

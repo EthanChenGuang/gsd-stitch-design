@@ -1,0 +1,49 @@
+{
+  "id": "ui-stitch",
+  "role": "feature",
+  "title": "Stitch UI design",
+  "description": "Generate per-phase screen designs (Google Stitch or the html renderer) from the global DESIGN.md right after GSD's own UI-SPEC step, and tell the planner to use them.",
+  "version": "1.1.0",
+  "tier": "full",
+  "requires": [],
+  "engines": { "gsd": ">=1.6.0" },
+  "runtimeCompat": { "supported": ["*"], "unsupported": [] },
+  "skills": ["ui-stitch-phase"],
+  "agents": [],
+  "hooks": [],
+  "steps": [
+    {
+      "point": "plan:pre",
+      "ref": { "skill": "ui-stitch-phase" },
+      "produces": ["SCREENS.md"],
+      "consumes": ["UI-SPEC.md"],
+      "when": "workflow.ui_stitch",
+      "onError": "skip"
+    }
+  ],
+  "contributions": [
+    {
+      "point": "plan:pre",
+      "into": "planner",
+      "when": "workflow.ui_stitch",
+      "fragment": {
+        "inline": "## Screen designs (gsd-ui-stitch-phase)\n\nIf the phase directory has a `design/` folder with `manifest.json` and a `{NN}-SCREENS.md` file, those screens are the visual reference for this phase. Cite the relevant screens by name in task actions, take token values (colors, fonts, spacing) from `.planning/design/DESIGN.md`, and take copy and states from the phase UI-SPEC. Do not invent a layout that contradicts a screen design."
+      },
+      "produces": [],
+      "consumes": ["SCREENS.md"]
+    }
+  ],
+  "gates": [],
+  "config": {
+    "workflow.ui_stitch": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run gsd-ui-stitch-phase before planning."
+    },
+    "workflow.ui_stitch_auto": {
+      "type": "boolean",
+      "default": false,
+      "description": "Auto-accept recommended options in gsd-ui-stitch-phase when run as a hook"
+    }
+  }
+}

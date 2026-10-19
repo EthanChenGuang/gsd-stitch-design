@@ -81,6 +81,22 @@ node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$PACK
   || fail "design-config.json template is not valid JSON"
 ok "static: design-config.json template parses"
 
+node -e '
+  const fs = require("fs");
+  const [capFile, verFile] = process.argv.slice(1);
+  const c = JSON.parse(fs.readFileSync(capFile, "utf8"));
+  const v = fs.readFileSync(verFile, "utf8").trim();
+  const bad = [];
+  if (c.id !== "ui-stitch") bad.push("id " + c.id);
+  const st = (c.steps || [])[0] || {};
+  if (!st.ref || st.ref.skill !== "ui-stitch-phase") bad.push("steps[0].ref.skill");
+  if ((st.produces || []).includes("UI-SPEC.md")) bad.push("step must not produce UI-SPEC.md");
+  if (c.version !== v) bad.push("version " + c.version + " != VERSION " + v);
+  if (bad.length) { console.error(bad.join("; ")); process.exit(1); }
+' "$PACK_DIR/capability/ui-stitch/capability.json" "$PACK_DIR/VERSION" \
+  || fail "capability.json check failed"
+ok "static: capability.json parses, version matches VERSION"
+
 # ---------------------------------------------------------------------------
 # contrast
 # ---------------------------------------------------------------------------
@@ -175,6 +191,11 @@ assert_rc 2 "install.sh with no args"
 run bash "$INSTALL" "$TMP/does-not-exist"
 [ "$RC" -ne 0 ] || fail "install.sh with a nonexistent target must fail"
 ok "usage: no args -> 2, nonexistent target -> $RC"
+run bash "$INSTALL" "$TMP" --register-only --uninstall
+assert_rc 2 "--register-only with --uninstall"
+run bash "$INSTALL" "$TMP" --register-only --no-autonomous
+assert_rc 2 "--register-only with --no-autonomous"
+ok "usage: --register-only combined with --uninstall or --no-autonomous -> 2"
 
 # ---------------------------------------------------------------------------
 # scenario A: project with CLAUDE.md and .planning/config.json
@@ -303,5 +324,144 @@ run bash "$INSTALL" "$C" --uninstall
 assert_rc 0 "C uninstall"
 cmp -s "$TMP/root-fixture.md" "$C/CLAUDE.md" || fail "C root CLAUDE.md not restored byte-for-byte"
 ok "C: root CLAUDE.md gets the block, no .claude/CLAUDE.md is created, uninstall restores it"
+
+# ---------------------------------------------------------------------------
+# scenario F: --register-only without GSD anywhere
+# ---------------------------------------------------------------------------
+F="$TMP/nogsd"
+mkdir -p "$F/.planning"
+printf '{"workflow":{}}\n' > "$F/.planning/config.json"
+SNAP_BEFORE="$(snapshot "$F")"
+run bash "$INSTALL" "$F" --register-only
+assert_rc 0 "F register-only without GSD"
+case "$OUT" in *"WARN"*) ;; *) fail "F expected a WARN: $OUT" ;; esac
+case "$OUT" in *"--register-only"*) ;; *) fail "F expected the re-register line: $OUT" ;; esac
+assert_eq "$SNAP_BEFORE" "$(snapshot "$F")" "F --register-only changed the project"
+ok "F: --register-only without GSD warns, exits 0, changes nothing"
+
+# ---------------------------------------------------------------------------
+# scenario D: GSD capability integration against the real gsd-tools (guarded)
+# ---------------------------------------------------------------------------
+GSD_CORE_SRC="${GSD_CORE_SRC:-$PACK_DIR/../../.claude/gsd-core}"
+if [ ! -f "$GSD_CORE_SRC/bin/gsd-tools.cjs" ]; then
+  printf 'skip - capability integration (no GSD at %s; set GSD_CORE_SRC)\n' "$GSD_CORE_SRC"
+else
+  D="$TMP/gsd project"
+  mkdir -p "$D/.claude" "$D/.planning"
+  printf '{"workflow":{"ui_phase":false}}\n' > "$D/.planning/config.json"
+  printf '# Fixture project\n' > "$D/.claude/CLAUDE.md"
+  cp -R "$GSD_CORE_SRC" "$D/.claude/gsd-core"
+  if [ -d "$(dirname "$GSD_CORE_SRC")/scripts" ]; then
+    cp -R "$(dirname "$GSD_CORE_SRC")/scripts" "$D/.claude/scripts"
+  fi
+  mkdir -p "$TMP/gsdhome-1"
+  export GSD_HOME="$TMP/gsdhome-1"
+  D_STAGED="$D/.gsd/capabilities/ui-stitch"
+  D_LEDGER="$D/.gsd-capabilities.json"
+
+  # hooks_state <proj>: active | absent | partial:... (from the plan:pre hooks GSD renders)
+  hooks_state() {
+    node "$1/.claude/gsd-core/bin/gsd-tools.cjs" loop render-hooks plan:pre --raw --project-dir "$1" 2>/dev/null \
+      | node -e '
+        let d = "";
+        process.stdin.on("data", (c) => (d += c)).on("end", () => {
+          let h;
+          try { h = JSON.parse(d).activeHooks; } catch (e) { console.log("unparsable"); return; }
+          const iUi = h.findIndex((e) => e.kind === "step" && e.capId === "ui");
+          const iSt = h.findIndex((e) => e.kind === "step" && e.capId === "ui-stitch" && e.ref && e.ref.skill === "ui-stitch-phase");
+          const contrib = h.some((e) => e.kind === "contribution" && e.capId === "ui-stitch" && e.into === "planner");
+          if (iUi >= 0 && iSt > iUi && contrib) console.log("active");
+          else if (!h.some((e) => e.capId === "ui-stitch")) console.log("absent");
+          else console.log("partial:ui=" + iUi + ",stitch=" + iSt + ",contrib=" + contrib);
+        });
+      ' || true
+  }
+  assert_hooks() { # assert_hooks <expected> <message>
+    local got
+    got="$(hooks_state "$D")"
+    [ -n "$got" ] || fail "$2 (hooks_state printed nothing)"
+    assert_eq "$1" "$got" "$2"
+  }
+
+  # D1: dry-run changes nothing and prints the registration command
+  run bash "$INSTALL" "$D" --dry-run
+  assert_rc 0 "D1 dry-run"
+  case "$OUT" in *"[dry-run]"*"capability install"*) ;; *) fail "D1 dry-run output lacks the capability install command: $OUT" ;; esac
+  [ ! -e "$D_STAGED" ] || fail "D1 dry-run created $D_STAGED"
+  [ ! -e "$D_LEDGER" ] || fail "D1 dry-run created $D_LEDGER"
+  ok "D1: dry-run prints the capability install command and writes nothing"
+
+  # D2: --no-autonomous installs skills but registers nothing
+  run bash "$INSTALL" "$D" --no-autonomous
+  assert_rc 0 "D2 --no-autonomous"
+  [ -f "$D/.claude/skills/gsd-ui-stitch-phase/SKILL.md" ] || fail "D2 skills were not installed"
+  [ ! -e "$D_STAGED" ] || fail "D2 registered the capability"
+  case "$OUT" in *"--no-autonomous"*) ;; *) fail "D2 output does not mention --no-autonomous: $OUT" ;; esac
+  assert_hooks absent "D2 hooks"
+  ok "D2: --no-autonomous installs skills and registers nothing"
+
+  # D3: default install registers the capability
+  run bash "$INSTALL" "$D"
+  assert_rc 0 "D3 install"
+  cmp -s "$PACK_DIR/capability/ui-stitch/capability.json" "$D_STAGED/capability.json" || fail "D3 staged capability.json differs from the pack"
+  assert_hooks active "D3 hooks (ui-stitch step after ui step + planner contribution)"
+  case "$OUT" in *"WARN: could not register"*) fail "D3 registration warning: $OUT" ;; esac
+  case "$OUT" in *"--register-only"*) ;; *) fail "D3 output lacks the re-register line: $OUT" ;; esac
+  case "$OUT" in *".gsd-capabilities.json"*) ;; *) fail "D3 output lacks the commit guidance: $OUT" ;; esac
+  ok "D3: install registers ui-stitch (step after ui, planner contribution)"
+
+  # D4: reinstall is idempotent, no ledger churn
+  H_LEDGER="$(hash_file "$D_LEDGER")"
+  run bash "$INSTALL" "$D"
+  assert_rc 0 "D4 reinstall"
+  case "$OUT" in *"WARN: could not register"*) fail "D4 registration warning: $OUT" ;; esac
+  case "$OUT" in *"= capability ui-stitch"*) ;; *) fail "D4 expected '= capability ui-stitch': $OUT" ;; esac
+  assert_hooks active "D4 hooks"
+  assert_eq "$H_LEDGER" "$(hash_file "$D_LEDGER")" "D4 ledger changed on reinstall"
+  ok "D4: reinstall exits 0, capability stays active, ledger untouched"
+
+  # D5: fresh GSD_HOME (new machine) -> inactive; --register-only re-activates, touches nothing else
+  mkdir -p "$TMP/gsdhome-2"
+  export GSD_HOME="$TMP/gsdhome-2"
+  assert_hooks absent "D5 hooks with a fresh GSD_HOME"
+  H_CLAUDE="$(hash_file "$D/.claude/CLAUDE.md")"
+  H_CFG="$(hash_file "$D/.planning/config.json")"
+  H_VER="$(hash_file "$D/.claude/skills/.gsd-stitch-design-version")"
+  H_SKILL="$(hash_file "$D/.claude/skills/gsd-ui-stitch-phase/SKILL.md")"
+  run bash "$INSTALL" "$D" --register-only
+  assert_rc 0 "D5 --register-only"
+  assert_hooks active "D5 hooks after --register-only"
+  assert_eq "$H_CLAUDE" "$(hash_file "$D/.claude/CLAUDE.md")" "D5 CLAUDE.md changed"
+  assert_eq "$H_CFG" "$(hash_file "$D/.planning/config.json")" "D5 .planning/config.json changed"
+  assert_eq "$H_VER" "$(hash_file "$D/.claude/skills/.gsd-stitch-design-version")" "D5 version file changed"
+  assert_eq "$H_SKILL" "$(hash_file "$D/.claude/skills/gsd-ui-stitch-phase/SKILL.md")" "D5 SKILL.md changed"
+  ok "D5: fresh GSD_HOME is inactive; --register-only re-activates and touches nothing else"
+
+  # D6: --register-only --dry-run
+  H_LEDGER="$(hash_file "$D_LEDGER")"
+  run bash "$INSTALL" "$D" --register-only --dry-run
+  assert_rc 0 "D6 register-only dry-run"
+  case "$OUT" in *"[dry-run]"*"capability install"*) ;; *) fail "D6 output lacks the dry-run command: $OUT" ;; esac
+  assert_eq "$H_LEDGER" "$(hash_file "$D_LEDGER")" "D6 dry-run changed the ledger"
+  ok "D6: --register-only --dry-run prints the command and changes nothing"
+
+  # D7: invalid combinations
+  run bash "$INSTALL" "$D" --register-only --uninstall
+  assert_rc 2 "D7 --register-only --uninstall"
+  run bash "$INSTALL" "$D" --register-only --no-autonomous
+  assert_rc 2 "D7 --register-only --no-autonomous"
+  ok "D7: --register-only with --uninstall or --no-autonomous exits 2"
+
+  # D8: uninstall removes the registration; a second uninstall says so
+  run bash "$INSTALL" "$D" --uninstall
+  assert_rc 0 "D8 uninstall"
+  [ ! -e "$D_STAGED" ] || fail "D8 staged capability still present"
+  assert_hooks absent "D8 hooks after uninstall"
+  [ ! -e "$D/.claude/skills/gsd-ui-stitch-phase" ] || fail "D8 skills still present"
+  run bash "$INSTALL" "$D" --uninstall
+  assert_rc 0 "D8 second uninstall"
+  case "$OUT" in *"not registered"*) ;; *) fail "D8 second uninstall lacks 'not registered': $OUT" ;; esac
+  ok "D8: uninstall removes the registration; second uninstall reports 'not registered'"
+fi
 
 printf 'ALL TESTS PASSED\n'
