@@ -1,0 +1,59 @@
+{
+  "_comment": {
+    "product_name": "字符串，必填，默认空。产品名称，用于 DESIGN.md 标题（# {product_name} Design System）、Stitch prompt、报告和设计简报；gsd-ui-stitch-phase 的 G1/G2/E 与 gsd-ui-design-pick 的第 1 步使用。",
+    "product_pitch": "字符串，必填，默认空。一句话产品描述（例如：面向上班族的在线记账工具）；用于设计简报和 Stitch prompt。",
+    "audience": "字符串，必填，默认空。目标用户、使用设备和使用场景（例如：通勤时单手用手机的成年人）；用于设计简报、G1 审查和打分。",
+    "ui_language": "字符串，必填，默认空。界面文案使用的语言（例如：English）；用于 G1 排版审查、Stitch prompt 和预览页。",
+    "content_language": "字符串或 null，选填，默认 null。界面里展示的内容文本所用的语言（例如产品展示外语学习内容时填学习语言）；null 表示与界面语言相同，此时跳过「内容语言」审查行，Stitch prompt 里也不写这一项。",
+    "communication_language": "字符串，选填，默认「简体中文」。两个 skill 与用户交流时使用的语言。",
+    "device": "枚举 MOBILE | DESKTOP | TABLET，选填，默认 MOBILE。目标设备；用于 G1「目标设备适配」、Stitch 的 deviceType、预览页导航形态。",
+    "viewport": "对象 {width, height}（数字，像素），选填，默认 390 x 844。设计稿渲染尺寸；用于 Stitch prompt 约束行和 html 渲染器（shoot.cjs 的 --width / --height）。",
+    "stack": "对象 {css, components}（字符串），选填，默认都为空。css 写样式方案和令牌入口（例如：Tailwind CSS 4 的 @theme）；components 写组件库及其 CSS 变量（例如：某组件库的 background / foreground / primary 变量）；用于 G1「可实现性」和 design-pick 的实现成本打分。",
+    "brand_exclusions": "字符串数组，选填，默认 []。绝不能模仿、也不能写进设计或 Stitch prompt 的品牌或竞品名称；用于 G1「原创性与授权」、design-pick 的初筛和约束提示。",
+    "font_rules": "字符串数组，选填，默认 []。额外的字体和排版规则（字体栈、行高、字形覆盖等）；每条会成为 G1「UI 语言排版」一行的检查内容。",
+    "review_extra_checks": "对象数组 [{dimension, check}]，选填，默认 []。追加到 G1 审查清单末尾的行；dimension 是维度名称，check 是检查什么。例如 {\"dimension\": \"表单状态\", \"check\": \"输入框的默认/聚焦/出错/禁用状态是否齐全\"}。",
+    "preview_samples": {
+      "_": "对象，选填，默认全部为空。gsd-ui-design-pick 第 5 步并排预览页使用的示例内容；全部为空时由 skill 根据设计简报自行编造并建议保存回这里。",
+      "heading": "字符串，页头标题。",
+      "primary_action": "字符串，主按钮文字。",
+      "secondary_action": "字符串，次按钮文字。",
+      "body_text": "字符串，一段正文示例。",
+      "list_items": "字符串数组，列表项示例。",
+      "conversation": "对象数组 [{speaker, text, translation}]，对话气泡示例；translation 可为 null。",
+      "domain_components": "字符串数组，产品特有组件的说明，每项在预览里渲染一张卡片。",
+      "nav_items": "字符串数组，导航项名称；MOBILE/TABLET 渲染为底部导航，DESKTOP 渲染为侧边导航。"
+    },
+    "renderer": "枚举 auto | stitch | html，选填，默认 auto。设计稿渲染方式；auto 在 E1 探测 Stitch 文件能否下载，不能就建议改用 html。可被 --renderer 参数覆盖。",
+    "stitch_project_title": "字符串，选填，默认空。Stitch 项目标题；空表示使用 product_name。"
+  },
+  "product_name": "",
+  "product_pitch": "",
+  "audience": "",
+  "ui_language": "",
+  "content_language": null,
+  "communication_language": "简体中文",
+  "device": "MOBILE",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "stack": {
+    "css": "",
+    "components": ""
+  },
+  "brand_exclusions": [],
+  "font_rules": [],
+  "review_extra_checks": [],
+  "preview_samples": {
+    "heading": "",
+    "primary_action": "",
+    "secondary_action": "",
+    "body_text": "",
+    "list_items": [],
+    "conversation": [],
+    "domain_components": [],
+    "nav_items": []
+  },
+  "renderer": "auto",
+  "stitch_project_title": ""
+}
