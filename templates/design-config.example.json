@@ -1,0 +1,68 @@
+{
+  "_comment": "这是一个填好的示例，取自源项目（Parla，面向中文母语者的意大利语口语 AI 外教 Web 应用）。字段含义见 design-config.json 模板里的 _comment。不要直接当作你的配置使用。",
+  "product_name": "Parla",
+  "product_pitch": "面向中文母语者的意大利语口语 AI 外教 Web 应用（移动优先）",
+  "audience": "想练意大利语口语的中文母语成年人，主要在手机上使用，常见场景是通勤或碎片时间单手操作",
+  "ui_language": "简体中文",
+  "content_language": "意大利语",
+  "communication_language": "简体中文",
+  "device": "MOBILE",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "stack": {
+    "css": "Tailwind CSS 4（@theme 令牌）",
+    "components": "shadcn/ui（CSS 变量：background、foreground、primary、secondary、muted、accent、destructive、border、input、ring、radius）"
+  },
+  "brand_exclusions": [
+    "Praktika",
+    "Duolingo",
+    "Babbel",
+    "Busuu",
+    "Speak",
+    "ELSA Speak",
+    "Memrise"
+  ],
+  "font_rules": [
+    "中文字体栈（如 PingFang SC、Noto Sans SC、Microsoft YaHei、system-ui），正文行高 >= 1.5，中文不加字间距，正文字号 >= 15-16px；避免需要加载几 MB 的中文网页字体",
+    "拉丁字体必须覆盖重音字母 à è é ì ò ù"
+  ],
+  "review_extra_checks": [
+    {
+      "dimension": "学习场景语义",
+      "check": "纠错（原句/更好的说法）、发音评分高中低、连续打卡、答对/答错、庆祝反馈有没有专门的颜色和样式；是否只靠红绿区分（色盲不友好）"
+    },
+    {
+      "dimension": "对话与语音",
+      "check": "外教/学习者对话气泡、按住说话的麦克风按钮（空闲/录音中/识别中/出错）、外教正在说话的状态、文字输入后备方案"
+    }
+  ],
+  "preview_samples": {
+    "heading": "今日学习",
+    "primary_action": "开始对话",
+    "secondary_action": "稍后再说",
+    "body_text": "每天和外教聊十分钟，把学过的句子真正说出口。",
+    "list_items": [],
+    "conversation": [
+      {
+        "speaker": "外教",
+        "text": "Ciao! Come stai oggi?",
+        "translation": "你好！你今天怎么样？"
+      },
+      {
+        "speaker": "学习者",
+        "text": "Sto bene, grazie.",
+        "translation": null
+      }
+    ],
+    "domain_components": [
+      "纠错卡：原句 Io sono andato al mercato ieri e compro pane，更好的说法 Io sono andato al mercato ieri e ho comprato il pane，附中文解释（过去的事情要保持时态一致）",
+      "连续打卡天数徽章",
+      "发音评分条（高/中/低三档）"
+    ],
+    "nav_items": ["学习", "练习", "词典", "我的"]
+  },
+  "renderer": "html",
+  "stitch_project_title": "Parla"
+}
