@@ -123,6 +123,7 @@ async function main() {
   for (const f of opts.files) {
     try {
       const abs = path.resolve(f);
+      if (!require('node:fs').existsSync(abs)) throw new Error('file not found');
       await page.goto(pathToFileURL(abs).href, { waitUntil: 'networkidle' }).catch(() => {});
       await settleFonts(page, opts.wait);
       const fam = await page.evaluate(() =>
