@@ -13,6 +13,7 @@ Fixes found while migrating Parla: wrong commit guidance for the registration fi
 
 ### Added
 
+- `gsd-ui-stitch-phase` fetches Stitch screen files with the Stitch MCP tool `download_file` (names taken from `get_screen` `htmlCode.name` and `screenshot.name`; the base64 image is decoded with `base64 -d`), in step X and in the renderer=auto E1 probe. `curl` on `downloadUrl` stays only as a fallback when `download_file` is unavailable, because those URLs need credentials and returned 401 in Parla.
 - Test scenario G (git-tracked ledger in fresh clones): both files committed, a second pack path, dry-run, version change, uninstall, a ledger-only clone and a nothing-committed clone.
 
 ### Changed

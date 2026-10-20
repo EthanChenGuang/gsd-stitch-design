@@ -260,7 +260,7 @@ T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
 | 界面在哪里 | Stitch 网页上的唯一项目（界面带 `[P{NN}]` 前缀） | 阶段目录下的独立 `.html` 文件 + `design/tokens.css` |
 | 保真度 | Stitch 生成，受其风格影响，需要用设计系统约束 | Claude 按 DESIGN.md 令牌手写，文案逐字取自 SCREENS.md，颜色只通过 `var(--...)` |
 | 需要什么 | Stitch MCP；下载文件可能需要 Google 登录态 | 只需要 Playwright 才能截图（HTML 本身不需要） |
-| 导出 | `get_screen` 取回 html 和截图，取不回就走网页导出 zip | 本来就是文件，核对 html 和 png 即可 |
+| 导出 | `get_screen` 拿到文件名，`download_file` 取回 html 和截图，取不回就走网页导出 zip | 本来就是文件，核对 html 和 png 即可 |
 | 修改 | `edit_screens`、`generate_variants`、`apply_design_system` | 直接改 html，用 `shoot.cjs` 重新截图 |
 | `auto` 时何时选 | E1 里真的去取 Stitch 返回的文件，能取到就选 stitch | 取不到（例如 401）或没有 Stitch 工具时，建议选 html |
 
@@ -270,7 +270,7 @@ T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
 
 下面只列源项目里有证据的做法，每条标明证据文件：
 
-- Stitch 的下载链接在没有 Google 登录态时返回 401，文件取不回来（`.planning/design/stitch.json`）。所以 `auto` 模式在 E1 就去真的下载一次，不行就建议改用 html。
+- Stitch 的下载链接在没有 Google 登录态时返回 401，文件取不回来（`.planning/design/stitch.json`）。所以 `auto` 模式在 E1 就去真的取一次文件，不行就建议改用 html。后来 Stitch MCP 加了 `download_file` 工具（按 `get_screen` 返回的 `htmlCode.name`、`screenshot.name` 取文件），这个 401 问题随之解决；skill 现在优先用它，只在没有这个工具时才退回 `curl`。
 - Stitch 返回的缩略图是 1x 的桌面画布截图，看起来分辨率很低；编辑过的界面还会从项目列表里消失（同在 `.planning/design/stitch.json` 的备注里）。
 - 第 1 阶段最终没有用 Stitch：设计稿是 Claude 写的 HTML，用 Playwright 按 390x844 @2x 渲染（`.planning/phases/01-accounts-text-tutor/design/manifest.json` 的 `renderer` 字段）。html 渲染器就是把这个做法固化下来。
 - DESIGN.md 升到了 v2，而 Stitch 里的设计系统还停在 v1（`.planning/design/stitch.json` 的 `note_v2`）。所以才有「全局前置检查」里的版本落后提示。

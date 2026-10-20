@@ -162,9 +162,9 @@ if [[ "$INIT" == @file:* ]]; then INIT=$(cat "${INIT#@file:}"); fi
 从 `INIT` 里取 `phase_dir`（下文写作 `{PD}`）、`phase_number`、`phase_name`、`padded_phase`（`{NN}`）、`phase_req_ids`、`context_path`。
 
 用 ToolSearch 一次性加载 Stitch 工具：
-`select:mcp__Google_Stitch__create_project,mcp__Google_Stitch__get_project,mcp__Google_Stitch__list_projects,mcp__Google_Stitch__generate_screen_from_text,mcp__Google_Stitch__get_screen,mcp__Google_Stitch__list_screens,mcp__Google_Stitch__edit_screens,mcp__Google_Stitch__generate_variants,mcp__Google_Stitch__upload_design_md,mcp__Google_Stitch__create_design_system_from_design_md,mcp__Google_Stitch__list_design_systems,mcp__Google_Stitch__apply_design_system,mcp__Google_Stitch__update_design_system`
+`select:mcp__Google_Stitch__create_project,mcp__Google_Stitch__get_project,mcp__Google_Stitch__list_projects,mcp__Google_Stitch__generate_screen_from_text,mcp__Google_Stitch__get_screen,mcp__Google_Stitch__list_screens,mcp__Google_Stitch__edit_screens,mcp__Google_Stitch__generate_variants,mcp__Google_Stitch__upload_design_md,mcp__Google_Stitch__create_design_system_from_design_md,mcp__Google_Stitch__list_design_systems,mcp__Google_Stitch__apply_design_system,mcp__Google_Stitch__update_design_system,mcp__Google_Stitch__download_file`
 
-一个都没加载到时，再用一次关键词 ToolSearch（关键词 `generate_screen_from_text`），看有没有 Stitch 服务器以别的前缀注册；找到就改用那个前缀（把上面所有工具名里的 `mcp__Google_Stitch__` 换成它）。
+一个都没加载到时，再用一次关键词 ToolSearch（关键词 `generate_screen_from_text`），看有没有 Stitch 服务器以别的前缀注册；找到就改用那个前缀（把上面所有工具名里的 `mcp__Google_Stitch__` 换成它，包括 `download_file`）。`download_file` 是取回界面 HTML 和截图的工具；服务器没有它时，X 步骤才退回 `curl`。
 
 仍然没有 Stitch 工具时：
 
@@ -428,7 +428,7 @@ prompt 里不要出现 `brand_exclusions` 里的任何名称，也不要把这�
 
 - `renderer` 为 `stitch`：用 Stitch 生成样板，不做探测。
 - `renderer` 为 `html`：直接走下面的 E-html，不碰 Stitch。
-- `renderer` 为 `auto`：先用 Stitch 生成样板，调用 `get_screen`，再**真的去取**它返回的 HTML 和截图（`curl` 下载，检查 HTTP 状态码、文件非空、HTML 里有 `<html` 或 `<body`）。
+- `renderer` 为 `auto`：先用 Stitch 生成样板，调用 `get_screen`，再**真的去取**它返回的 HTML 和截图：用 `download_file`，`name` 取 `get_screen` 返回的 `htmlCode.name` 和 `screenshot.name`，检查 `html` 字段非空且含 `<html` 或 `<body`，`image` 字段非空。没有 `download_file` 时才退回 `curl` 下载 `downloadUrl`（检查 HTTP 状态码、文件非空、HTML 里有 `<html` 或 `<body`），这些链接要登录凭据，Parla 实测返回 401。
   - 能取到 → 渲染方式定为 `stitch`。
   - 取不到（例如 401），或者根本没有 Stitch 工具 → 用 AskUserQuestion 问：「改用 html 渲染器（推荐）」/「继续用 Stitch，最后从网页导出 zip」/「先停在这里」。
 
@@ -484,16 +484,21 @@ prompt 里不要出现 `brand_exclusions` 里的任何名称，也不要把这�
 **Stitch 渲染**：对 manifest 里每张 `generated` 的界面：
 
 1. `get_screen(name: "projects/{pid}/screens/{sid}")`
-2. 按返回内容保存：
-   - 直接带 HTML/代码 → 写到 `{slug}.html`
-   - 返回下载链接 →
+2. 按返回内容保存。`get_screen` 返回 `htmlCode: {name, downloadUrl, mimeType}` 和 `screenshot: {name, downloadUrl}`，取出两个 `name`（形如 `projects/{pid}/files/{fid}`），分别调用 `download_file(name)`：
+   - HTML：返回的 `html` 字段是原始 HTML，用 Write 工具写到 `{PD}/design/{slug}.html`。
+   - 截图：返回的 `image` 字段是 base64，`image_metadata` 带 `mime_type`、`width`、`height`。先用 Write 把 base64 文本写到临时文件，再解码成图片，扩展名按 `mime_type` 选（`image/png` 用 `.png`，`image/jpeg` 用 `.jpg`，`image/webp` 用 `.webp`）：
      ```bash
-     curl -fsSL --retry 3 -o "{PD}/design/{slug}.html" "<html_url>"
-     curl -fsSL --retry 3 -o "{PD}/design/{slug}.png"  "<screenshot_url>"
+     base64 -d "{PD}/design/{slug}.b64" > "{PD}/design/{slug}.png" && rm -f "{PD}/design/{slug}.b64"
+     ```
+   - `get_screen` 直接带 HTML 内容时，同样写到 `{slug}.html`。
+   - 只有 `download_file` 不可用时才退回 `curl` 下载 `downloadUrl`。这些链接要登录凭据，没有 Google 登录态时返回 401（Parla 实测）：
+     ```bash
+     curl -fsSL --retry 3 -o "{PD}/design/{slug}.html" "<htmlCode.downloadUrl>"
+     curl -fsSL --retry 3 -o "{PD}/design/{slug}.png"  "<screenshot.downloadUrl>"
      ```
      （若运行环境通过代理出网并附有代理说明文件，遇到 TLS 或 403 时先看那份说明；不要关闭证书校验。）
-   - 检查文件不是空的，`.html` 里有 `<html` 或 `<body`，`.png` 用 `file` 确认是图片
-3. 下载链接返回 401 或 403（没有 Google 登录态的下载链接常见）时，用 AskUserQuestion 问：「把剩下的界面改用 html 渲染器」（推荐，manifest 的 `renderer` 改为 `html`，已导出的 Stitch 界面保留并在 manifest 里逐条注明来源）/「走 zip 退路」。
+   - 无论哪种方式，都检查文件不是空的，`.html` 里有 `<html` 或 `<body`，图片文件用 `file` 确认是图片。
+3. `download_file` 不可用，且 `curl` 下载链接返回 401 或 403（没有 Google 登录态的下载链接常见）时，用 AskUserQuestion 问：「把剩下的界面改用 html 渲染器」（推荐，manifest 的 `renderer` 改为 `html`，已导出的 Stitch 界面保留并在 manifest 里逐条注明来源）/「走 zip 退路」。
 4. manifest 里状态改为 `exported`，`design_version` 写入当前全局版本。
 
 **退路**（MCP 取不回文件）：请用户在 Stitch 网页上导出 zip，放到 `{PD}/design/stitch-export.zip`，然后：
