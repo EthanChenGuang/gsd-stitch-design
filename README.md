@@ -1,6 +1,6 @@
 # gsd-stitch-design
 
-给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.1.0），变更记录见 `CHANGELOG.md`。
+给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.1.1），变更记录见 `CHANGELOG.md`。
 
 ## 这是什么
 
@@ -58,7 +58,7 @@ bash /tmp/gsd-stitch-src/tools/gsd-stitch-design/install.sh /path/to/project
 | `.claude/CLAUDE.md`（没有就用根目录 `CLAUDE.md`，都没有就新建 `.claude/CLAUDE.md`） | 插入或更新一段 `<!-- gsd-stitch-design:start -->` 到 `<!-- gsd-stitch-design:end -->` 之间的「UI Design Workflow」说明，标记之外的内容不动。 |
 | `.planning/config.json` | 把 `workflow.ui_phase` 设为 `true`，其他键保持不变；文件不存在或不是合法 JSON 时只给出警告。 |
 | `.claude/skills/.gsd-stitch-design-version` | 写入包的版本号。 |
-| `.gsd/capabilities/ui-stitch/capability.json`、`.gsd-capabilities.json` | 由 GSD 命令行（`capability install`）写入：注册 GSD 能力 `ui-stitch`，详见「接入 /gsd-autonomous」。需要 `.planning/` 和 GSD；缺少时只警告。用 `--no-autonomous` 可以不注册。 |
+| `.gsd/capabilities/ui-stitch/capability.json`、`.gsd-capabilities.json` | 由 GSD 命令行（`capability install`）写入：注册 GSD 能力 `ui-stitch`，详见「接入 /gsd-autonomous」。需要 `.planning/` 和 GSD；缺少时只警告。用 `--no-autonomous` 可以不注册。两个文件都要提交：登记册用普通 `git add`，manifest 用 `git add -f .gsd/capabilities/ui-stitch/capability.json`，原因见「该提交哪些文件」。登记册被 git 跟踪，且和 HEAD 相比只有易变字段（顶层 `updatedAt`、条目的 `source`）不同时，安装器会还原已提交的版本，并打印 `= .gsd-capabilities.json (only volatile fields changed; restored)`；真正的变化（例如版本号升级）会保留，并用 `~` 打印。`--dry-run` 只打印「会做这项检查」。 |
 | `$GSD_HOME/.gsd/consent.json`（`GSD_HOME` 默认是 `~`，在项目之外） | 本机的授权记录，按项目绝对路径记录，不属于项目，不要提交。 |
 
 ### 参数与退出码
@@ -196,9 +196,28 @@ bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall            
 bash /path/to/gsd-stitch-design/install.sh /path/to/project --register-only
 ```
 
-**该提交哪些文件**：`.gsd/capabilities/ui-stitch/capability.json` 和 `.gsd-capabilities.json` 要提交，后者是 `capability remove` 需要的登记册。注意登记册里的 `source` 字段记着本机的 pack 路径，这只是本地路径，不含密钥。`consent.json` 在项目之外，不要提交。
+**该提交哪些文件**：两个登记文件都要提交。登记册用普通的 `git add`，manifest 必须带 `-f`：
 
-**可选：SessionStart 钩子**。云端会话里自动重新注册，在 `.claude/settings.json` 里加（路径换成你的 pack 位置）。已启用时它什么都不做，所以不会反复改写登记册：
+```bash
+git add .gsd-capabilities.json
+git add -f .gsd/capabilities/ui-stitch/capability.json
+```
+
+为什么要 `-f`：GSD 第一次记录它的 dispatch-isolation sentinel 时（例如运行 execute-phase），会写一个内容为 `*` 的 `.gsd/.gitignore`。之后 `git check-ignore -v .gsd/capabilities/ui-stitch/capability.json` 会打印 `.gsd/.gitignore:1:*`，普通的 `git add` 或 `git add -A` 会悄悄跳过 capability.json，只暂存 `.gsd-capabilities.json`。GSD 还没写过这个文件的项目里普通 add 也行；`-f` 两种情况都对。不要去改 `.gsd/.gitignore`，它归 GSD 管；它连自己也忽略，所以永远不会被提交，新克隆里也没有它。只对这一个路径用 `-f`，不要 `git add -f .gsd`，否则 GSD 的运行时文件也会被提交。
+
+在新克隆、新的 `GSD_HOME` 下运行 `--register-only` 的实测结果（gsd-tools 1.17.0）：
+
+| 已提交的内容 | 注册后能力 | `git status --porcelain` |
+|---|---|---|
+| 两个文件都提交（推荐） | 启用 | 空，工作区干净 |
+| 只提交登记册 | 启用 | `?? .gsd/` |
+| 都不提交 | 启用 | `?? .gsd/` 和 `?? .gsd-capabilities.json` |
+
+三种情况下 `--register-only` 都会重新生成两个文件并启用能力，之后 `--uninstall` 也能正常移除，所以提交与否只关系到工作区是否干净，以及没有 pack 时的退路，和能否启用无关。（判断是否启用要看 `loop render-hooks`，不要看 `capability list`：只要登记册里有条目，后者就显示 `active`。）
+
+登记册里的 `source` 字段记着本机的 pack 路径，这只是本地路径，不含密钥；不同机器的 `source` 不同，安装器的还原步骤会吸收这个差异，已提交的版本保持不变。`consent.json` 在项目之外，不要提交。
+
+**可选：SessionStart 钩子**。云端会话里自动重新注册，在 `.claude/settings.json` 里加（路径换成你的 pack 位置）。本机已有授权记录时，它什么都不做。新会话里 GSD 重新注册会改写登记册，安装器发现只有易变字段（`updatedAt`、`source`）变了，就还原已提交的版本，所以钩子不需要任何 git 步骤，会话开始时工作区是干净的（前提是登记册已提交，见上表）：
 
 ```json
 {
@@ -217,7 +236,7 @@ bash /path/to/gsd-stitch-design/install.sh /path/to/project --register-only
 }
 ```
 
-没有 pack 的机器可以用不依赖 pack 的退路：把已提交的 `capability.json` 复制到临时目录再安装，然后删掉临时目录。
+没有 pack 的机器可以用不依赖 pack 的退路：把已提交的 `capability.json` 复制到临时目录再安装，然后删掉临时目录。这条路径直接调用 GSD，不经过 `install.sh`，所以没有东西还原登记册：`updatedAt` 和 `source`（现在指向已删除的临时目录）会保持改动。装完运行 `git checkout -- .gsd-capabilities.json` 取回已提交的版本；能力是否启用不依赖登记册。
 
 ```bash
 T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \

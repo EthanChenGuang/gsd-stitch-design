@@ -408,6 +408,7 @@ else
   case "$OUT" in *"WARN: could not register"*) fail "D3 registration warning: $OUT" ;; esac
   case "$OUT" in *"--register-only"*) ;; *) fail "D3 output lacks the re-register line: $OUT" ;; esac
   case "$OUT" in *".gsd-capabilities.json"*) ;; *) fail "D3 output lacks the commit guidance: $OUT" ;; esac
+  case "$OUT" in *"git add -f .gsd/capabilities/ui-stitch/capability.json"*) ;; *) fail "D3 output lacks the git add -f guidance: $OUT" ;; esac
   ok "D3: install registers ui-stitch (step after ui, planner contribution)"
 
   # D4: reinstall is idempotent, no ledger churn
@@ -536,6 +537,115 @@ else
     assert_eq "" "$(git -C "$K1" status --porcelain)" "G1 work tree is not clean"
     [ ! -e "$K1/.gsd/.gitignore" ] || fail "G1 the installer created .gsd/.gitignore"
     ok "G1: fresh clone with both files committed: --register-only activates and leaves the tree clean"
+
+    # G2: same clone, fresh machine, registering from a second pack path
+    mkdir -p "$TMP/gsdhome-g3" "$TMP/second place"
+    export GSD_HOME="$TMP/gsdhome-g3"
+    cp -R "$PACK_DIR" "$TMP/second place/pack copy"
+    assert_hooks_in "$K1" absent "G2 hooks before registration"
+    run bash "$TMP/second place/pack copy/install.sh" "$K1" --register-only
+    assert_rc 0 "G2 --register-only from a second pack path"
+    case "$OUT" in *"= .gsd-capabilities.json (only volatile fields changed; restored)"*) ;; *) fail "G2 missing the restored line: $OUT" ;; esac
+    assert_hooks_in "$K1" active "G2 hooks"
+    assert_eq "" "$(git -C "$K1" status --porcelain)" "G2 work tree is not clean"
+    ok "G2: re-registering from a second pack path leaves the tree clean (only updatedAt/source differ)"
+
+    # G3: --register-only --dry-run writes nothing
+    mkdir -p "$TMP/gsdhome-g4"
+    export GSD_HOME="$TMP/gsdhome-g4"
+    G3_STATUS="$(git -C "$K1" status --porcelain)"
+    G3_LEDGER="$(hash_file "$K1/.gsd-capabilities.json")"
+    G3_LIST="$(find "$K1/.gsd" | LC_ALL=C sort)"
+    G3_INDEX="$(hash_file "$K1/.git/index")"
+    run bash "$INSTALL" "$K1" --register-only --dry-run
+    assert_rc 0 "G3 register-only dry-run"
+    case "$OUT" in *"[dry-run]"*"capability install"*) ;; *) fail "G3 output lacks the dry-run command: $OUT" ;; esac
+    case "$OUT" in *"would restore .gsd-capabilities.json"*) ;; *) fail "G3 output lacks the would-restore line: $OUT" ;; esac
+    assert_eq "$G3_STATUS" "$(git -C "$K1" status --porcelain)" "G3 dry-run changed the status"
+    assert_eq "$G3_LEDGER" "$(hash_file "$K1/.gsd-capabilities.json")" "G3 dry-run changed the ledger"
+    assert_eq "$G3_LIST" "$(find "$K1/.gsd" | LC_ALL=C sort)" "G3 dry-run changed .gsd"
+    assert_eq "$G3_INDEX" "$(hash_file "$K1/.git/index")" "G3 dry-run changed .git/index"
+    [ ! -e "$GSD_HOME/.gsd/consent.json" ] || fail "G3 dry-run wrote the consent store"
+    assert_hooks_in "$K1" absent "G3 hooks after dry-run"
+    ok "G3: --register-only --dry-run only reports; ledger, .gsd, status, index and consent store unchanged"
+
+    # G4: a real change (version bump) is kept, not restored
+    mkdir -p "$TMP/gsdhome-g5"
+    export GSD_HOME="$TMP/gsdhome-g5"
+    cp -R "$PACK_DIR" "$TMP/pack v9"
+    printf '9.9.9\n' > "$TMP/pack v9/VERSION"
+    node -e '
+      const fs = require("fs");
+      const f = process.argv[1];
+      const c = JSON.parse(fs.readFileSync(f, "utf8"));
+      c.version = "9.9.9";
+      fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");
+    ' "$TMP/pack v9/capability/ui-stitch/capability.json"
+    run bash "$TMP/pack v9/install.sh" "$K1" --register-only
+    assert_rc 0 "G4 --register-only from the 9.9.9 pack"
+    case "$OUT" in *"~ .gsd-capabilities.json"*) ;; *) fail "G4 missing the kept (~) ledger line: $OUT" ;; esac
+    case "$OUT" in *"restored"*) fail "G4 restored a real change: $OUT" ;; esac
+    G4_VER="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).entries["ui-stitch"].version)' "$K1/.gsd-capabilities.json")"
+    assert_eq "9.9.9" "$G4_VER" "G4 ledger version"
+    assert_eq " M .gsd-capabilities.json" "$(git -C "$K1" status --porcelain -- .gsd-capabilities.json)" "G4 ledger status"
+    git -C "$K1" checkout -q -- .
+    run bash "$INSTALL" "$K1" --register-only
+    assert_rc 0 "G4 --register-only from the main pack"
+    assert_eq "" "$(git -C "$K1" status --porcelain)" "G4 work tree is not clean after returning to the main pack"
+    assert_hooks_in "$K1" active "G4 hooks after returning to the main pack"
+    ok "G4: a version change is kept (~ line, M status); returning to the main pack is clean and active"
+
+    # G5: uninstall after a restored ledger
+    run bash "$INSTALL" "$K1" --uninstall
+    assert_rc 0 "G5 uninstall"
+    case "$OUT" in *"- capability ui-stitch (registration removed)"*) ;; *) fail "G5 missing the removal line: $OUT" ;; esac
+    [ ! -e "$K1/.gsd/capabilities/ui-stitch" ] || fail "G5 staged capability still present"
+    assert_hooks_in "$K1" absent "G5 hooks after uninstall"
+    G5_ENTRIES="$(node -e 'const e = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).entries; console.log(JSON.stringify(e))' "$K1/.gsd-capabilities.json")"
+    assert_eq "{}" "$G5_ENTRIES" "G5 ledger entries"
+    ok "G5: --uninstall after a restored ledger removes the registration and empties entries"
+
+    # G6: ledger-only and nothing-committed clones (D-1 cases A and B)
+    git -C "$S" checkout -q -b case-a
+    git -C "$S" rm -q --cached -- .gsd/capabilities/ui-stitch/capability.json
+    git -C "$S" commit -qm "case a: ledger only"
+    gclone "$S" "$TMP/clone a" case-a
+    mkdir -p "$TMP/gsdhome-g6"
+    export GSD_HOME="$TMP/gsdhome-g6"
+    assert_hooks_in "$TMP/clone a" absent "G6a hooks before registration"
+    run bash "$INSTALL" "$TMP/clone a" --register-only
+    assert_rc 0 "G6a --register-only"
+    assert_hooks_in "$TMP/clone a" active "G6a hooks"
+    G6A_STATUS="$(git -C "$TMP/clone a" status --porcelain)"
+    printf '# G6a ledger-only clone, git status --porcelain:\n'
+    printf '%s\n' "$G6A_STATUS" | sed 's/^/# /'
+    assert_eq "?? .gsd/" "$G6A_STATUS" "G6a status"
+    run bash "$INSTALL" "$TMP/clone a" --uninstall
+    assert_rc 0 "G6a uninstall"
+    [ ! -e "$TMP/clone a/.gsd/capabilities/ui-stitch" ] || fail "G6a staged dir still present"
+    assert_hooks_in "$TMP/clone a" absent "G6a hooks after uninstall"
+
+    git -C "$S" checkout -q -b case-b
+    git -C "$S" rm -q --cached -- .gsd-capabilities.json
+    git -C "$S" commit -qm "case b: nothing committed"
+    gclone "$S" "$TMP/clone b" case-b
+    mkdir -p "$TMP/gsdhome-g7"
+    export GSD_HOME="$TMP/gsdhome-g7"
+    assert_hooks_in "$TMP/clone b" absent "G6b hooks before registration"
+    run bash "$INSTALL" "$TMP/clone b" --register-only
+    assert_rc 0 "G6b --register-only"
+    assert_hooks_in "$TMP/clone b" active "G6b hooks"
+    case "$OUT" in *".gsd-capabilities.json ("*) fail "G6b printed a ledger line: $OUT" ;; esac
+    G6B_STATUS="$(git -C "$TMP/clone b" status --porcelain)"
+    printf '# G6b nothing-committed clone, git status --porcelain:\n'
+    printf '%s\n' "$G6B_STATUS" | sed 's/^/# /'
+    case "$G6B_STATUS" in *"?? .gsd-capabilities.json"*) ;; *) fail "G6b status lacks ?? .gsd-capabilities.json: $G6B_STATUS" ;; esac
+    case "$G6B_STATUS" in *"?? .gsd/"*) ;; *) fail "G6b status lacks ?? .gsd/: $G6B_STATUS" ;; esac
+    run bash "$INSTALL" "$TMP/clone b" --uninstall
+    assert_rc 0 "G6b uninstall"
+    [ ! -e "$TMP/clone b/.gsd/capabilities/ui-stitch" ] || fail "G6b staged dir still present"
+    assert_hooks_in "$TMP/clone b" absent "G6b hooks after uninstall"
+    ok "G6: ledger-only clone -> active, status '?? .gsd/'; nothing-committed clone -> active, both untracked; uninstall works in both"
   fi
 fi
 

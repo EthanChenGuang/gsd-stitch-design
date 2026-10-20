@@ -2,6 +2,23 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] - 2026-10-20
+
+Fixes found while migrating Parla: wrong commit guidance for the registration files, and a dirty ledger after every fresh-session re-registration.
+
+### Fixed
+
+- The commit guidance in the install next steps and the README now uses `git add -f .gsd/capabilities/ui-stitch/capability.json` and explains GSD's `.gsd/.gitignore` (content `*`), which makes a plain `git add` skip that file. It tells users never to edit that `.gitignore`.
+- Re-registration no longer leaves a git-tracked `.gsd-capabilities.json` dirty when only the top-level `updatedAt` or the entry `source` changed. The installer restores the committed version and prints `=`; real changes such as a version bump are kept and printed with `~`; `--dry-run` only reports that the check would run. The check uses read-only git plumbing, so no repository hooks run.
+
+### Added
+
+- Test scenario G (git-tracked ledger in fresh clones): both files committed, a second pack path, dry-run, version change, uninstall, a ledger-only clone and a nothing-committed clone.
+
+### Changed
+
+- The README sections 安装器会改什么 and 接入 /gsd-autonomous describe the restore, the three fresh-clone outcomes and the SessionStart hook without a git step. The capability manifest version now follows `VERSION`.
+
 ## [1.1.0] - 2026-10-19
 
 Registers the pack as a GSD project capability so that autonomous runs produce the screen designs too.

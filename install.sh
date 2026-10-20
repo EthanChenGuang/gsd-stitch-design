@@ -587,7 +587,11 @@ fi
 case "$RESULT" in
   registered|active)
     STEP5="  5. GSD 能力 ui-stitch 已注册：/gsd-autonomous 和 /gsd-plan-phase --auto 现在会在前端阶段的 gsd-ui-phase 之后自动运行 gsd-ui-stitch-phase。
-     请把 .gsd/capabilities/ui-stitch/capability.json 和 .gsd-capabilities.json 提交进仓库（后者是 capability remove 所需的登记册，其 source 字段记录本机的 pack 路径）。
+     请把两个登记文件都提交进仓库（.gsd-capabilities.json 是 capability remove 所需的登记册，其 source 字段记录本机的 pack 路径）：
+       git add .gsd-capabilities.json
+       git add -f .gsd/capabilities/ui-stitch/capability.json
+     第二条必须带 -f：GSD 把运行时文件放在 .gsd/ 里，并写入内容为 * 的 .gsd/.gitignore，普通的 git add 会悄悄跳过 capability.json。不要去改那个 .gitignore，它归 GSD 管。
+     提交之后，新克隆只需运行下面的重新注册命令，工作区仍然干净：重新注册只改动易变字段（updatedAt、source）时，安装器会把已提交的登记册还原回去。
      授权记录（consent）保存在 \${GSD_HOME:-\$HOME}/.gsd/consent.json，按机器、按项目绝对路径记录，不要提交。换新机器、云端会话或移动项目目录后，需要再运行一次下面的重新注册命令。
      关闭：把 workflow.ui_stitch 设为 false。"
     ;;
