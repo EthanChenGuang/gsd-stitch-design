@@ -233,6 +233,49 @@ process.exit(hit ? 0 : 1);
 EOF
 )
 
+LEDGER_JS=$(cat <<'EOF'
+// argv: headFile workFile
+// Exit 0 when the two ledgers are equal after dropping the volatile fields, 1 when they differ,
+// 2 when either file is not a parsable plain JSON object.
+const fs = require('fs');
+// Volatile fields: the only ledger fields that differ between registrations of the same
+// manifest from two pack paths (verified against GSD 1.17.0). version, integrity, files
+// and sharedEdits are real content and must never be added here.
+const VOLATILE_TOP = ['updatedAt'];
+const VOLATILE_ENTRY = ['source'];
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+function load(file) {
+  let v;
+  try {
+    v = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    process.exit(2);
+  }
+  if (!isObj(v)) process.exit(2);
+  return v;
+}
+function normalize(v) {
+  const c = JSON.parse(JSON.stringify(v));
+  for (const k of VOLATILE_TOP) delete c[k];
+  if (isObj(c.entries)) {
+    for (const id of Object.keys(c.entries)) {
+      if (isObj(c.entries[id])) for (const k of VOLATILE_ENTRY) delete c.entries[id][k];
+    }
+  }
+  return c;
+}
+function stable(v) {
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  if (isObj(v)) return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+const [headFile, workFile] = process.argv.slice(1);
+const a = load(headFile);
+const b = load(workFile);
+process.exit(stable(normalize(a)) === stable(normalize(b)) ? 0 : 1);
+EOF
+)
+
 # ---------------------------------------------------------------------------
 # GSD capability registration
 # ---------------------------------------------------------------------------
@@ -259,6 +302,45 @@ print_reregister_hint() {
   printf 'Re-register on another machine / cloud session: bash %q %q --register-only\n' "$PACK_DIR/install.sh" "$TARGET"
 }
 
+# restore_volatile_ledger: when .gsd-capabilities.json is tracked by git and the fresh
+# registration changed only volatile fields (updatedAt, entry source), put the committed
+# bytes back so the work tree stays clean. Read-only git plumbing plus a plain file write:
+# no checkout/restore/status, so no repo hooks run and dry-run writes nothing. Never fails.
+restore_volatile_ledger() {
+  command -v git >/dev/null 2>&1 || return 0
+  local inside="" prefix="" head_id="" index_id="" tmp="" rc=0 keep_line
+  inside="$(git -C "$TARGET" rev-parse --is-inside-work-tree 2>/dev/null || true)"
+  [ "$inside" = "true" ] || return 0
+  prefix="$(git -C "$TARGET" rev-parse --show-prefix 2>/dev/null || true)"
+  head_id="$(git -C "$TARGET" rev-parse -q --verify "HEAD:${prefix}${LEDGER_REL}" 2>/dev/null || true)"
+  [ -n "$head_id" ] || return 0
+  if [ "$DRY" -eq 1 ]; then
+    printf '%swould restore %s from HEAD if only volatile fields change\n' "$DRY_PREFIX" "$LEDGER_REL"
+    return 0
+  fi
+  [ -f "$TARGET/$LEDGER_REL" ] || return 0
+  keep_line="~ $LEDGER_REL (registration changed; kept, commit it)"
+  index_id="$(git -C "$TARGET" rev-parse -q --verify ":${prefix}${LEDGER_REL}" 2>/dev/null || true)"
+  if [ "$index_id" != "$head_id" ]; then
+    printf '%s\n' "$keep_line"
+    return 0
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/gsd-sd-ledger.XXXXXX")"
+  if git -C "$TARGET" cat-file blob "$head_id" > "$tmp" 2>/dev/null; then
+    node -e "$LEDGER_JS" "$tmp" "$TARGET/$LEDGER_REL" 2>/dev/null || rc=$?
+  else
+    rc=2
+  fi
+  if [ "$rc" -eq 0 ]; then
+    cat "$tmp" > "$TARGET/$LEDGER_REL" || true
+    printf '= %s (only volatile fields changed; restored)\n' "$LEDGER_REL"
+  else
+    printf '%s\n' "$keep_line"
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
 # register_capability: never fails the script; sets RESULT.
 register_capability() {
   RESULT=""
@@ -280,6 +362,7 @@ register_capability() {
   fi
   if [ "$DRY" -eq 1 ]; then
     printf '%swould run: node %s capability install %s --scope project --yes --project-dir %s\n' "$DRY_PREFIX" "$GSD_TOOLS" "$CAP_SRC" "$TARGET"
+    restore_volatile_ledger
     return 0
   fi
 
@@ -307,6 +390,7 @@ register_capability() {
       RESULT="registered"
       printf '+ capability %s registered (project scope)\n' "$CAP_ID"
     fi
+    restore_volatile_ledger
   else
     RESULT="failed"
     local why

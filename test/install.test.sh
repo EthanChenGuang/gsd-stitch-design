@@ -431,6 +431,7 @@ else
   run bash "$INSTALL" "$D" --register-only
   assert_rc 0 "D5 --register-only"
   assert_hooks active "D5 hooks after --register-only"
+  case "$OUT" in *".gsd-capabilities.json ("*) fail "D5 non-git target printed a ledger line: $OUT" ;; esac
   assert_eq "$H_CLAUDE" "$(hash_file "$D/.claude/CLAUDE.md")" "D5 CLAUDE.md changed"
   assert_eq "$H_CFG" "$(hash_file "$D/.planning/config.json")" "D5 .planning/config.json changed"
   assert_eq "$H_VER" "$(hash_file "$D/.claude/skills/.gsd-stitch-design-version")" "D5 version file changed"
@@ -462,6 +463,80 @@ else
   assert_rc 0 "D8 second uninstall"
   case "$OUT" in *"not registered"*) ;; *) fail "D8 second uninstall lacks 'not registered': $OUT" ;; esac
   ok "D8: uninstall removes the registration; second uninstall reports 'not registered'"
+
+  # -------------------------------------------------------------------------
+  # scenario G: git-tracked ledger in fresh clones
+  # -------------------------------------------------------------------------
+  if ! command -v git >/dev/null 2>&1; then
+    printf 'skip - git ledger scenarios (git not found)\n'
+  else
+    # gclone <src> <dst> [branch]: clone, then copy in the ignored GSD copy.
+    gclone() {
+      if [ -n "${3:-}" ]; then
+        git clone -q -b "$3" "$1" "$2" 2>/dev/null
+      else
+        git clone -q "$1" "$2" 2>/dev/null
+      fi
+      cp -R "$GSD_CORE_SRC" "$2/.claude/gsd-core"
+      if [ -d "$(dirname "$GSD_CORE_SRC")/scripts" ]; then
+        cp -R "$(dirname "$GSD_CORE_SRC")/scripts" "$2/.claude/scripts"
+      fi
+    }
+    assert_hooks_in() { # assert_hooks_in <proj> <expected> <message>
+      local got
+      got="$(hooks_state "$1")"
+      [ -n "$got" ] || fail "$3 (hooks_state printed nothing)"
+      assert_eq "$2" "$got" "$3"
+    }
+
+    S="$TMP/git src"
+    mkdir -p "$S/.claude" "$S/.planning"
+    printf '/.claude/gsd-core/\n/.claude/scripts/\n' > "$S/.gitignore"
+    printf '{"workflow":{"ui_phase":true}}\n' > "$S/.planning/config.json"
+    printf '# Fixture project\n' > "$S/.claude/CLAUDE.md"
+    cp -R "$GSD_CORE_SRC" "$S/.claude/gsd-core"
+    if [ -d "$(dirname "$GSD_CORE_SRC")/scripts" ]; then
+      cp -R "$(dirname "$GSD_CORE_SRC")/scripts" "$S/.claude/scripts"
+    fi
+    git -c init.defaultBranch=main init -q "$S"
+    git -C "$S" config user.email "test@example.com"
+    git -C "$S" config user.name "Test"
+    git -C "$S" config commit.gpgsign false
+    mkdir -p "$TMP/gsdhome-g1"
+    export GSD_HOME="$TMP/gsdhome-g1"
+    run bash "$INSTALL" "$S"
+    assert_rc 0 "G setup install"
+    case "$OUT" in *"WARN: could not register"*) fail "G setup registration warning: $OUT" ;; esac
+    # Emulate GSD's dispatch-isolation sentinel writer (only the fixture writes this file).
+    printf '*\n' > "$S/.gsd/.gitignore"
+
+    # G0: P1 reproduction
+    git -C "$S" add -A
+    git -C "$S" check-ignore -q -- .gsd/capabilities/ui-stitch/capability.json || fail "G0 capability.json is not ignored"
+    STAGED="$(git -C "$S" diff --cached --name-only)"
+    case "$STAGED" in *".gsd-capabilities.json"*) ;; *) fail "G0 plain add did not stage the ledger: $STAGED" ;; esac
+    case "$STAGED" in *"ui-stitch/capability.json"*) fail "G0 plain add staged capability.json: $STAGED" ;; esac
+    git -C "$S" add -f -- .gsd/capabilities/ui-stitch/capability.json
+    git -C "$S" commit -qm fixture
+    TRACKED="$(git -C "$S" ls-files)"
+    case "$TRACKED" in *".gsd-capabilities.json"*) ;; *) fail "G0 ledger not tracked: $TRACKED" ;; esac
+    case "$TRACKED" in *".gsd/capabilities/ui-stitch/capability.json"*) ;; *) fail "G0 capability.json not tracked: $TRACKED" ;; esac
+    ok "G0: GSD's .gsd/.gitignore hides capability.json from plain git add; git add -f commits it"
+
+    # G1: fresh clone, both files committed
+    K1="$TMP/clone one"
+    gclone "$S" "$K1"
+    mkdir -p "$TMP/gsdhome-g2"
+    export GSD_HOME="$TMP/gsdhome-g2"
+    assert_hooks_in "$K1" absent "G1 hooks before registration"
+    run bash "$INSTALL" "$K1" --register-only
+    assert_rc 0 "G1 --register-only"
+    case "$OUT" in *"= .gsd-capabilities.json (only volatile fields changed; restored)"*) ;; *) fail "G1 missing the restored line: $OUT" ;; esac
+    assert_hooks_in "$K1" active "G1 hooks after --register-only"
+    assert_eq "" "$(git -C "$K1" status --porcelain)" "G1 work tree is not clean"
+    [ ! -e "$K1/.gsd/.gitignore" ] || fail "G1 the installer created .gsd/.gitignore"
+    ok "G1: fresh clone with both files committed: --register-only activates and leaves the tree clean"
+  fi
 fi
 
 printf 'ALL TESTS PASSED\n'
