@@ -15,6 +15,7 @@ The pack now lives in its own repository, so projects no longer need the source 
 ### Added
 
 - GitHub Actions workflow that runs `test/install.test.sh` on every push and pull request.
+- Release workflow: a push to `main` that names a new version in `VERSION` publishes the `v<VERSION>` tag and release, with that version's CHANGELOG section as the notes.
 
 ## [1.1.1] - 2026-10-20
 

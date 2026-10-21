@@ -279,6 +279,12 @@ T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
 - 从 v1 到 v2 的全局变更是先写成提案文件再批准的（`.planning/design/DESIGN-CHANGE-v2.md`），G4 因此固定产出 `DESIGN-CHANGE-v{n}.md`。
 - awesome-design-md 里的模板都是仿某个真实品牌的分析，选定后要去品牌化再锁定（`.planning/design/DESIGN-PICK.md`，候选文件在 `.planning/design/candidates/`）。
 
+## 发布新版本（维护者）
+
+1. 改 `VERSION`，在 `CHANGELOG.md` 顶部加上这个版本的一节（`## [x.y.z] - 日期`），同时把 `capability/ui-stitch/capability.json` 里的 `version` 改成同一个值。
+2. 运行自检：`bash test/install.test.sh`。
+3. 推到 `main`。`release` 工作流会再跑一次自检，然后自动创建 `vx.y.z` 标签和 Release，说明取自 CHANGELOG 里这一节。标签已存在时什么都不做。
+
 ## 卸载
 
 ```bash
