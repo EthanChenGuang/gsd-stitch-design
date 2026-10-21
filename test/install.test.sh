@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end test for the gsd-stitch-design pack.
-# Usage: bash tools/gsd-stitch-design/test/install.test.sh
+# Usage: bash test/install.test.sh   (from the pack root)
 set -euo pipefail
 
 PACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"

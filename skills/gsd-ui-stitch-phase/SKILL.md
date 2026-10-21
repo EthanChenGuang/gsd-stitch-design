@@ -428,7 +428,7 @@ prompt 里不要出现 `brand_exclusions` 里的任何名称，也不要把这�
 
 - `renderer` 为 `stitch`：用 Stitch 生成样板，不做探测。
 - `renderer` 为 `html`：直接走下面的 E-html，不碰 Stitch。
-- `renderer` 为 `auto`：先用 Stitch 生成样板，调用 `get_screen`，再**真的去取**它返回的 HTML 和截图：用 `download_file`，`name` 取 `get_screen` 返回的 `htmlCode.name` 和 `screenshot.name`，检查 `html` 字段非空且含 `<html` 或 `<body`，`image` 字段非空。没有 `download_file` 时才退回 `curl` 下载 `downloadUrl`（检查 HTTP 状态码、文件非空、HTML 里有 `<html` 或 `<body`），这些链接要登录凭据，Parla 实测返回 401。
+- `renderer` 为 `auto`：先用 Stitch 生成样板，调用 `get_screen`，再**真的去取**它返回的 HTML 和截图：用 `download_file`，`name` 取 `get_screen` 返回的 `htmlCode.name` 和 `screenshot.name`，检查 `html` 字段非空且含 `<html` 或 `<body`，`image` 字段非空。没有 `download_file` 时才退回 `curl` 下载 `downloadUrl`（检查 HTTP 状态码、文件非空、HTML 里有 `<html` 或 `<body`），这些链接要登录凭据，实测没有登录态时返回 401。
   - 能取到 → 渲染方式定为 `stitch`。
   - 取不到（例如 401），或者根本没有 Stitch 工具 → 用 AskUserQuestion 问：「改用 html 渲染器（推荐）」/「继续用 Stitch，最后从网页导出 zip」/「先停在这里」。
 
@@ -491,7 +491,7 @@ prompt 里不要出现 `brand_exclusions` 里的任何名称，也不要把这�
      base64 -d "{PD}/design/{slug}.b64" > "{PD}/design/{slug}.png" && rm -f "{PD}/design/{slug}.b64"
      ```
    - `get_screen` 直接带 HTML 内容时，同样写到 `{slug}.html`。
-   - 只有 `download_file` 不可用时才退回 `curl` 下载 `downloadUrl`。这些链接要登录凭据，没有 Google 登录态时返回 401（Parla 实测）：
+   - 只有 `download_file` 不可用时才退回 `curl` 下载 `downloadUrl`。这些链接要登录凭据，没有 Google 登录态时返回 401（实测）：
      ```bash
      curl -fsSL --retry 3 -o "{PD}/design/{slug}.html" "<htmlCode.downloadUrl>"
      curl -fsSL --retry 3 -o "{PD}/design/{slug}.png"  "<screenshot.downloadUrl>"

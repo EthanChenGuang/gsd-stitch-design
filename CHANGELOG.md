@@ -2,6 +2,20 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-10-21
+
+The pack now lives in its own repository, so projects no longer need the source project to install it.
+
+### Changed
+
+- Install from `https://github.com/EthanChenGuang/gsd-stitch-design` at a fixed tag; every command in the README runs from the pack root.
+- The README has a section on re-registering the capability from a cloud SessionStart hook, with a vendored copy or a pinned clone.
+- Notes that named the source project are worded neutrally; the filled example in `templates/design-config.example.json` keeps its values as an example.
+
+### Added
+
+- GitHub Actions workflow that runs `test/install.test.sh` on every push and pull request.
+
 ## [1.1.1] - 2026-10-20
 
 Fixes found while migrating Parla: wrong commit guidance for the registration files, and a dirty ledger after every fresh-session re-registration.

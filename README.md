@@ -29,25 +29,27 @@
 
 ## 安装
 
-在本仓库里（或任何拿到了这个目录的地方）：
+先把包克隆到临时目录，固定版本号，**看过 `install.sh` 之后**再运行。不要把远程脚本直接交给 shell 执行。
 
 ```bash
-bash tools/gsd-stitch-design/install.sh /path/to/project --dry-run   # 先看会改什么，不写任何文件
-bash tools/gsd-stitch-design/install.sh /path/to/project
+git clone --depth 1 --branch v1.2.0 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design
+bash /tmp/gsd-stitch-design/install.sh /path/to/project --dry-run   # 先看会改什么，不写任何文件
+bash /tmp/gsd-stitch-design/install.sh /path/to/project
 ```
 
-从 GitHub 获取：先克隆到临时目录，**看过 `install.sh` 之后**再运行。不要把远程脚本直接交给 shell 执行。
+也可以把包放进项目里（例如 `tools/gsd-stitch-design/`，作为固定版本的副本），云端会话不用联网就能重新注册。下文的 `install.sh` 指包根目录里的那个脚本，无论它放在哪里。
+
+### 云端会话（Claude Code on the web）
+
+能力的授权记录存在 `~/.gsd`，新容器里没有，所以要在项目的 SessionStart 钩子里重新注册：
 
 ```bash
-git clone --depth 1 https://github.com/EthanChenGuang/learn-italian /tmp/gsd-stitch-src
-# 可选：只取这个目录
-#   git clone --depth 1 --filter=blob:none --sparse https://github.com/EthanChenGuang/learn-italian /tmp/gsd-stitch-src
-#   git -C /tmp/gsd-stitch-src sparse-checkout set tools/gsd-stitch-design
-bash /tmp/gsd-stitch-src/tools/gsd-stitch-design/install.sh /path/to/project --dry-run
-bash /tmp/gsd-stitch-src/tools/gsd-stitch-design/install.sh /path/to/project
+# 包放在项目里时
+bash "$CLAUDE_PROJECT_DIR/tools/gsd-stitch-design/install.sh" "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
+# 或每次从固定版本克隆
+git clone -q --depth 1 --branch v1.2.0 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design \
+  && bash /tmp/gsd-stitch-design/install.sh "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
 ```
-
-如果仓库是私有的，先用 `gh auth login` 登录 GitHub，再克隆。
 
 ### 安装器会改什么
 
@@ -187,7 +189,7 @@ verify
 ```bash
 node .claude/gsd-core/bin/gsd-tools.cjs config-set workflow.ui_stitch false           # 保留注册，钩子不再运行
 node .claude/gsd-core/bin/gsd-tools.cjs capability remove ui-stitch --scope project   # 移除注册
-bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall                  # 连同 skill 一起卸载
+bash install.sh /path/to/project --uninstall                  # 连同 skill 一起卸载
 ```
 
 **授权记录按机器保存**：GSD 只在本机有授权记录时才启用项目能力。记录在 `$GSD_HOME/.gsd/consent.json`（`GSD_HOME` 默认是 `~`），按项目的绝对路径记录。所以换新机器、开云端会话、或把项目目录挪了位置之后，项目里虽然有 `.gsd/capabilities/ui-stitch/capability.json`，能力却是未启用状态，GSD 悄悄地只运行自己的 ui 步骤。这时重新注册一次：
@@ -266,9 +268,9 @@ T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
 
 设置：在 design-config.json 里写 `"renderer": "auto"`、`"stitch"` 或 `"html"`，或在命令里带 `--renderer`。选定后会写进每阶段 manifest 的 `renderer` 字段；确定了就把配置里的值改成它，下次不用再探测。
 
-## Parla 实践经验
+## 实践经验
 
-下面只列源项目里有证据的做法，每条标明证据文件：
+下面是第一个使用这个包的项目里有证据的做法（括号里是那个项目里的证据文件）：
 
 - Stitch 的下载链接在没有 Google 登录态时返回 401，文件取不回来（`.planning/design/stitch.json`）。所以 `auto` 模式在 E1 就去真的取一次文件，不行就建议改用 html。后来 Stitch MCP 加了 `download_file` 工具（按 `get_screen` 返回的 `htmlCode.name`、`screenshot.name` 取文件），这个 401 问题随之解决；skill 现在优先用它，只在没有这个工具时才退回 `curl`。
 - Stitch 返回的缩略图是 1x 的桌面画布截图，看起来分辨率很低；编辑过的界面还会从项目列表里消失（同在 `.planning/design/stitch.json` 的备注里）。
@@ -280,8 +282,8 @@ T=$(mktemp -d) && cp .gsd/capabilities/ui-stitch/capability.json "$T/" \
 ## 卸载
 
 ```bash
-bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall --dry-run   # 先预览
-bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall
+bash install.sh /path/to/project --uninstall --dry-run   # 先预览
+bash install.sh /path/to/project --uninstall
 ```
 
 会删除：GSD 能力注册（执行 `capability remove ui-stitch`，同时删掉 `.gsd/capabilities/ui-stitch` 和本机授权记录；`.gsd-capabilities.json` 文件保留，其中的 entries 变成空对象）、两个 skill 目录、`CLAUDE.md` 里标记之间的那一段（连同它前面的一个空行，所以安装再卸载后文件内容和原来逐字节一致；删完变成空文件就一并删除）、版本文件。
@@ -291,8 +293,8 @@ bash tools/gsd-stitch-design/install.sh /path/to/project --uninstall
 ## 升级
 
 1. 取得新版本的包（再次克隆，或更新你已有的副本），读 `CHANGELOG.md`。
-2. 先预览：`bash tools/gsd-stitch-design/install.sh /path/to/project --dry-run`。
+2. 先预览：`bash install.sh /path/to/project --dry-run`。
 3. 重新运行安装。重新安装会重新注册能力（版本升级也一样处理，`capability.json` 里的 `version` 跟随 `VERSION`；已启用且内容相同时什么都不改）。如果你改过已安装的 skill 文件，会看到 `CONFLICT:` 并以退出码 3 拒绝；确认可以丢弃本地修改时加 `--force`。
 4. 已安装的版本号在 `.claude/skills/.gsd-stitch-design-version`。
 5. `design-config.json` 永远不会被覆盖：新版本加了字段时，把 `templates/design-config.json` 与你的文件对一下，手工补上。
-6. 想确认包本身没问题，运行自检：`bash tools/gsd-stitch-design/test/install.test.sh`，最后一行应为 `ALL TESTS PASSED`。
+6. 想确认包本身没问题，运行自检：`bash test/install.test.sh`，最后一行应为 `ALL TESTS PASSED`。
