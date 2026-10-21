@@ -27,29 +27,40 @@
 - **Playwright**（可选，html 渲染器截图用）：`npm i -D playwright`，然后 `npx playwright install chromium`。没有时 html 文件照样生成，只是没有 PNG。
 - **git 和 GitHub 访问**：`/gsd-ui-design-pick` 要克隆 `https://github.com/VoltAgent/awesome-design-md`。
 
-## 安装
+## 安装（一条命令）
 
-先把包克隆到临时目录，固定版本号，**看过 `install.sh` 之后**再运行。不要把远程脚本直接交给 shell 执行。
+前提：项目里已经装好 GSD（有 `.planning/`），机器上有 `node`、`curl`、`git`。在项目根目录运行：
 
 ```bash
-git clone --depth 1 --branch v1.2.0 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design
-bash /tmp/gsd-stitch-design/install.sh /path/to/project --dry-run   # 先看会改什么，不写任何文件
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash
+```
+
+它会：取最新的 Release（缓存在 `~/.cache/gsd-stitch-design/<版本>`），安装两个 skill，注册 GSD 能力 `ui-stitch`，再把所有要提交的文件 `git add` 好（包括必须用 `-f` 的 `.gsd/capabilities/ui-stitch/capability.json`）。最后按提示 `git commit` 一次即可。
+
+常用变体（参数原样传给 `install.sh`）：
+
+```bash
+# 指定项目目录 / 先预览
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- /path/to/project --dry-run
+# 云端新容器里只重新注册（放进 SessionStart 钩子）
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
+# 升级到最新版本（改过已安装的 skill 时才需要 --force）
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- --force
+# 卸载
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- --uninstall
+```
+
+想固定某个版本时，在 `bash` 前加 `GSD_STITCH_REF=v1.2.0`。想先读脚本再运行：把 `bootstrap.sh` 下载下来看过，再 `bash bootstrap.sh`。
+
+### 手动安装
+
+```bash
+git clone --depth 1 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design
+bash /tmp/gsd-stitch-design/install.sh /path/to/project --dry-run
 bash /tmp/gsd-stitch-design/install.sh /path/to/project
 ```
 
-也可以把包放进项目里（例如 `tools/gsd-stitch-design/`，作为固定版本的副本），云端会话不用联网就能重新注册。下文的 `install.sh` 指包根目录里的那个脚本，无论它放在哪里。
-
-### 云端会话（Claude Code on the web）
-
-能力的授权记录存在 `~/.gsd`，新容器里没有，所以要在项目的 SessionStart 钩子里重新注册：
-
-```bash
-# 包放在项目里时
-bash "$CLAUDE_PROJECT_DIR/tools/gsd-stitch-design/install.sh" "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
-# 或每次从固定版本克隆
-git clone -q --depth 1 --branch v1.2.0 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design \
-  && bash /tmp/gsd-stitch-design/install.sh "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
-```
+手动安装后要自己提交两个登记文件（`git add .gsd-capabilities.json` 和 `git add -f .gsd/capabilities/ui-stitch/capability.json`），原因见「该提交哪些文件」。也可以把包作为固定版本的副本放进项目（例如 `tools/gsd-stitch-design/`），云端会话不联网也能用它的 `install.sh --register-only` 重新注册。
 
 ### 安装器会改什么
 

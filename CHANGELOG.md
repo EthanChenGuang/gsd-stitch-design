@@ -2,6 +2,17 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] - 2026-10-21
+
+### Added
+
+- `bootstrap.sh`: one command (`curl -fsSL .../bootstrap.sh | bash`) that fetches the latest release, installs, registers the `ui-stitch` capability and stages every file to commit, including the `-f` one. Flags pass through to `install.sh`; `GSD_STITCH_REF` pins a version. Releases are cached under `~/.cache/gsd-stitch-design/<tag>`.
+- CI runs the bootstrap against a temporary project.
+
+### Changed
+
+- The README leads with the one-command install; the clone-and-run steps stay as the manual method.
+
 ## [1.2.0] - 2026-10-21
 
 The pack now lives in its own repository, so projects no longer need the source project to install it.
