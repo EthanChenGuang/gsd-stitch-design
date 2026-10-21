@@ -1,0 +1,43 @@
+name: release
+
+# Publishes v<VERSION> as a tag and a GitHub release when VERSION names a version
+# that has no tag yet. The notes are that version's section of CHANGELOG.md.
+on:
+  push:
+    branches: [main]
+    paths: [VERSION, CHANGELOG.md, .github/workflows/release.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Installer self-test
+        run: bash test/install.test.sh
+      - name: Publish the release if VERSION is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists; nothing to release."
+            exit 0
+          fi
+          # The CHANGELOG section for this version, without its heading.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no section for $version" >&2; exit 1; }
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
