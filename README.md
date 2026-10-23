@@ -2,6 +2,18 @@
 
 给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.1.1），变更记录见 `CHANGELOG.md`。
 
+## 让 Claude 安装（给 AI 助手的步骤）
+
+在任何项目里对 Claude 说「安装这个 skill：https://github.com/EthanChenGuang/gsd-stitch-design」即可。Claude 按下面的步骤做：
+
+1. 确认项目是 GSD 项目：有 `.claude/gsd-core/`（或 `~/.claude/gsd-core/`）和 `.planning/config.json`。
+   - 没有 GSD：运行 `npx -y @opengsd/gsd-core@latest --claude --local`。
+   - 没有 `.planning/`：先运行 `/gsd-new-project`，完成后再继续。
+2. 在项目根目录运行：`curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash`
+   - 它缺 GSD 或 `.planning/` 时会以退出码 1 停下、什么都不写，并说明缺什么。按提示补上后重新运行。
+3. 提交并推送它暂存的文件：`git commit -m "Install gsd-stitch-design" && git push`（云端会话必须推送，容器结束后未推送的改动会丢失）。
+4. 按项目情况填 `.planning/design/design-config.json`（产品名、语言、设备视口、技术栈、要避开的品牌、`renderer`），然后告诉用户可以运行 `/gsd-ui-design-pick` 开始全局设计。
+
 ## 这是什么
 
 两层设计，一个来源：
@@ -29,7 +41,7 @@
 
 ## 安装和注册（两步）
 
-前提：项目里已经装好 GSD（有 `.planning/`），机器上有 `node`、`curl`、`git`。
+前提：项目里已经装好 GSD（有 `.planning/`），机器上有 `node`、`curl`、`git`。缺 GSD 或 `.planning/` 时，第 1 步会直接报错退出、不写任何文件，并告诉你怎么补。
 
 **第 1 步**：在项目根目录运行
 
@@ -56,6 +68,7 @@ git commit -m "Install gsd-stitch-design" && git push
 | 卸载（连同钩子） | `--uninstall` |
 | 不要 SessionStart 钩子 | `--no-hook` |
 | 指定项目目录 | 把目录写在参数里，例如 `-- /path/to/project` |
+| 没装 GSD 也要先装 skill | `--skip-gsd-check` |
 | 固定某个版本 | 在 `bash` 前加 `GSD_STITCH_REF=v1.3.0` |
 
 想先读脚本再运行：把 `bootstrap.sh` 下载下来看过，再 `bash bootstrap.sh`。注意第 1 步会整个暂存 `.claude/CLAUDE.md`、`.claude/settings.json` 和 `.planning/config.json`，里面若有你自己的未提交改动，提交前用 `git diff --cached` 看一下。

@@ -2,6 +2,16 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.1] - 2026-10-23
+
+### Changed
+
+- `bootstrap.sh` checks for GSD (`.claude/gsd-core` in the project or `~/.claude`, or `gsd_run`) and for `.planning/config.json` before downloading anything. When either is missing it writes nothing, exits 1 and prints what is missing and how to fix it; `--skip-gsd-check` installs anyway. Before, it warned and carried on, ending with "done".
+
+### Added
+
+- README section with the steps Claude follows when asked to install the pack from this repository's URL.
+
 ## [1.4.0] - 2026-10-23
 
 ### Added

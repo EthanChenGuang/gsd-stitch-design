@@ -22,7 +22,9 @@ jobs:
           bash -n bootstrap.sh
           proj="$(mktemp -d)"
           git -C "$proj" init -q
-          GSD_STITCH_REF=main bash bootstrap.sh "$proj" --no-autonomous
+          ! GSD_STITCH_REF=main bash bootstrap.sh "$proj"   # no GSD here: must refuse
+          test ! -e "$proj/.claude/skills"
+          GSD_STITCH_REF=main bash bootstrap.sh "$proj" --no-autonomous --skip-gsd-check
           test -f "$proj/.claude/skills/gsd-ui-stitch-phase/SKILL.md"
           test -f "$proj/.claude/skills/gsd-ui-design-pick/SKILL.md"
           git -C "$proj" diff --cached --name-only | grep -q gsd-ui-stitch-phase

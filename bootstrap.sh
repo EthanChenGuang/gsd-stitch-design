@@ -9,7 +9,8 @@
 # current directory), then stages every file a normal install writes so one
 # `git commit` finishes the job. Flags such as --dry-run, --register-only,
 # --uninstall, --force and --no-autonomous are passed to install.sh unchanged.
-# A full install also adds a SessionStart hook that re-registers the capability in
+# It stops without writing anything when GSD or .planning/ is missing (override with
+# --skip-gsd-check). A full install also adds a SessionStart hook that re-registers the capability in
 # fresh cloud containers (skip it with --no-hook); --uninstall removes it again.
 set -euo pipefail
 
@@ -26,15 +27,40 @@ command -v node >/dev/null || die "node is required (the installer and GSD both 
 target="."
 flags=()
 with_hook=1
+check_gsd=1
 for arg in "$@"; do
   case "$arg" in
     --no-hook) with_hook=0 ;;
+    --skip-gsd-check) check_gsd=0 ;;
     -*) flags+=("$arg") ;;
     *) target="$arg" ;;
   esac
 done
 [ -d "$target" ] || die "project directory not found: $target"
 target="$(cd "$target" && pwd)"
+
+# The skills only work inside a GSD project, so stop before writing anything when GSD
+# or the project's .planning/ is missing (uninstall and help still run).
+needs_gsd=1
+for arg in ${flags[@]+"${flags[@]}"}; do
+  case "$arg" in --uninstall|-h|--help) needs_gsd=0 ;; esac
+done
+if [ "$check_gsd" = 1 ] && [ "$needs_gsd" = 1 ]; then
+  missing=()
+  if [ ! -f "$target/.claude/gsd-core/bin/gsd-tools.cjs" ] && [ ! -f "$HOME/.claude/gsd-core/bin/gsd-tools.cjs" ] \
+    && ! command -v gsd_run >/dev/null 2>&1; then
+    missing+=("GSD is not installed (no .claude/gsd-core in the project or in ~/.claude). Install it: npx -y @opengsd/gsd-core@latest --claude --local")
+  fi
+  if [ ! -f "$target/.planning/config.json" ]; then
+    missing+=("this is not a GSD project yet (no .planning/config.json). Run /gsd-new-project in Claude Code first.")
+  fi
+  if [ "${#missing[@]}" -gt 0 ]; then
+    printf 'gsd-stitch-design: ERROR: nothing was installed in %s\n' "$target" >&2
+    for m in "${missing[@]}"; do printf '  - %s\n' "$m" >&2; done
+    printf '  Then run this command again. (--skip-gsd-check installs the skills anyway.)\n' >&2
+    exit 1
+  fi
+fi
 
 # Resolve the newest release tag unless a ref was pinned.
 ref="${GSD_STITCH_REF:-}"

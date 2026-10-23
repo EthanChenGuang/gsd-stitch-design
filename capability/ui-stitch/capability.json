@@ -3,7 +3,7 @@
   "role": "feature",
   "title": "Stitch UI design",
   "description": "Generate per-phase screen designs (Google Stitch or the html renderer) from the global DESIGN.md right after GSD's own UI-SPEC step, and tell the planner to use them.",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "tier": "full",
   "requires": [],
   "engines": { "gsd": ">=1.6.0" },
