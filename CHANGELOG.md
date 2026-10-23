@@ -2,6 +2,16 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.4.0] - 2026-10-23
+
+### Added
+
+- `bootstrap.sh` adds a SessionStart hook (`.claude/hooks/gsd-stitch-design.sh`, registered in `.claude/settings.json`) that re-registers the `ui-stitch` capability in fresh Claude cloud containers and does nothing on a local machine. `--no-hook` skips it; `--uninstall` removes it.
+
+### Changed
+
+- Install and registration are two steps: run the one command, then commit and push. The README leads with them and keeps every other operation as a flag of the same command.
+
 ## [1.3.0] - 2026-10-21
 
 ### Added

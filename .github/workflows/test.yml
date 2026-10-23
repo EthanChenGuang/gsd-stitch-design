@@ -26,3 +26,8 @@ jobs:
           test -f "$proj/.claude/skills/gsd-ui-stitch-phase/SKILL.md"
           test -f "$proj/.claude/skills/gsd-ui-design-pick/SKILL.md"
           git -C "$proj" diff --cached --name-only | grep -q gsd-ui-stitch-phase
+          test -x "$proj/.claude/hooks/gsd-stitch-design.sh"
+          grep -q gsd-stitch-design.sh "$proj/.claude/settings.json"
+          GSD_STITCH_REF=main bash bootstrap.sh "$proj" --uninstall
+          test ! -e "$proj/.claude/hooks/gsd-stitch-design.sh"
+          test ! -e "$proj/.claude/settings.json"

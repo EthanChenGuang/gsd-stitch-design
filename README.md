@@ -27,30 +27,38 @@
 - **Playwright**（可选，html 渲染器截图用）：`npm i -D playwright`，然后 `npx playwright install chromium`。没有时 html 文件照样生成，只是没有 PNG。
 - **git 和 GitHub 访问**：`/gsd-ui-design-pick` 要克隆 `https://github.com/VoltAgent/awesome-design-md`。
 
-## 安装（一条命令）
+## 安装和注册（两步）
 
-前提：项目里已经装好 GSD（有 `.planning/`），机器上有 `node`、`curl`、`git`。在项目根目录运行：
+前提：项目里已经装好 GSD（有 `.planning/`），机器上有 `node`、`curl`、`git`。
+
+**第 1 步**：在项目根目录运行
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash
 ```
 
-它会：取最新的 Release（缓存在 `~/.cache/gsd-stitch-design/<版本>`），安装两个 skill，注册 GSD 能力 `ui-stitch`，再把所有要提交的文件 `git add` 好（包括必须用 `-f` 的 `.gsd/capabilities/ui-stitch/capability.json`）。最后按提示 `git commit` 一次即可。
-
-常用变体（参数原样传给 `install.sh`）：
+**第 2 步**：提交并推送
 
 ```bash
-# 指定项目目录 / 先预览
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- /path/to/project --dry-run
-# 云端新容器里只重新注册（放进 SessionStart 钩子）
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- "$CLAUDE_PROJECT_DIR" --register-only >/dev/null 2>&1 || true
-# 升级到最新版本（改过已安装的 skill 时才需要 --force）
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- --force
-# 卸载
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash -s -- --uninstall
+git commit -m "Install gsd-stitch-design" && git push
 ```
 
-想固定某个版本时，在 `bash` 前加 `GSD_STITCH_REF=v1.2.0`。想先读脚本再运行：把 `bootstrap.sh` 下载下来看过，再 `bash bootstrap.sh`。
+完成。本地和 Claude 云端都能用：第 1 步装好最新版的两个 skill，注册 GSD 能力 `ui-stitch`（`/gsd-autonomous` 会自动跑设计步骤），加一个 SessionStart 钩子让云端每个新容器自动重新注册，并把这些文件全部暂存好。之后按项目填 `.planning/design/design-config.json`。
+
+在 Claude 云端会话里不用自己开终端：把上面两步直接告诉 Claude，让它运行即可。
+
+其他操作都是同一条命令加参数（`... | bash -s -- <参数>`）：
+
+| 想做什么 | 参数 |
+|---|---|
+| 先预览，不改文件 | `--dry-run` |
+| 升级到最新版 | 不加参数再跑一次（改过已安装的 skill 时加 `--force`） |
+| 卸载（连同钩子） | `--uninstall` |
+| 不要 SessionStart 钩子 | `--no-hook` |
+| 指定项目目录 | 把目录写在参数里，例如 `-- /path/to/project` |
+| 固定某个版本 | 在 `bash` 前加 `GSD_STITCH_REF=v1.3.0` |
+
+想先读脚本再运行：把 `bootstrap.sh` 下载下来看过，再 `bash bootstrap.sh`。注意第 1 步会整个暂存 `.claude/CLAUDE.md`、`.claude/settings.json` 和 `.planning/config.json`，里面若有你自己的未提交改动，提交前用 `git diff --cached` 看一下。
 
 ### 手动安装
 

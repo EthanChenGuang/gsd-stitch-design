@@ -9,6 +9,8 @@
 # current directory), then stages every file a normal install writes so one
 # `git commit` finishes the job. Flags such as --dry-run, --register-only,
 # --uninstall, --force and --no-autonomous are passed to install.sh unchanged.
+# A full install also adds a SessionStart hook that re-registers the capability in
+# fresh cloud containers (skip it with --no-hook); --uninstall removes it again.
 set -euo pipefail
 
 REPO="EthanChenGuang/gsd-stitch-design"
@@ -23,8 +25,10 @@ command -v node >/dev/null || die "node is required (the installer and GSD both 
 
 target="."
 flags=()
+with_hook=1
 for arg in "$@"; do
   case "$arg" in
+    --no-hook) with_hook=0 ;;
     -*) flags+=("$arg") ;;
     *) target="$arg" ;;
   esac
@@ -58,21 +62,75 @@ say "pack $ref ($(cat "$pack/VERSION" 2>/dev/null || echo '?')) from $pack"
 
 bash "$pack/install.sh" "$target" ${flags[@]+"${flags[@]}"}
 
-# Stage what a full install wrote; dry runs, uninstalls and re-registration leave git alone.
+mode=install
 for f in ${flags[@]+"${flags[@]}"}; do
-  case "$f" in --dry-run|--uninstall|--register-only|-h|--help) exit 0 ;; esac
+  case "$f" in
+    --dry-run|--register-only|-h|--help) exit 0 ;;
+    --uninstall) mode=uninstall ;;
+  esac
 done
+
+# Cloud sessions start in fresh containers without the GSD consent record in ~/.gsd, so a
+# SessionStart hook re-registers the capability there. It does nothing on a local machine.
+hook_file=".claude/hooks/gsd-stitch-design.sh"
+hook_cmd='bash "$CLAUDE_PROJECT_DIR/.claude/hooks/gsd-stitch-design.sh"'
+settings_hook() { # $1 = add | remove
+  SETTINGS="$target/.claude/settings.json" CMD="$hook_cmd" ACTION="$1" node -e '
+    const fs = require("fs"), f = process.env.SETTINGS, cmd = process.env.CMD
+    let j = {}
+    if (fs.existsSync(f)) { try { j = JSON.parse(fs.readFileSync(f, "utf8")) } catch { console.error("WARN: " + f + " is not valid JSON; hook entry not changed"); process.exit(0) } }
+    const groups = ((j.hooks = j.hooks || {}).SessionStart = j.hooks.SessionStart || [])
+    const has = (g) => (g.hooks || []).some((h) => h.command === cmd)
+    if (process.env.ACTION === "add") {
+      if (groups.some(has)) process.exit(0)
+      groups.push({ hooks: [{ type: "command", command: cmd }] })
+    } else {
+      j.hooks.SessionStart = groups.filter((g) => !has(g))
+      if (!j.hooks.SessionStart.length) delete j.hooks.SessionStart
+      if (!Object.keys(j.hooks).length) delete j.hooks
+    }
+    if (!Object.keys(j).length) { if (fs.existsSync(f)) fs.unlinkSync(f); process.exit(0) }
+    fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n")'
+}
+
+if [ "$mode" = uninstall ]; then
+  if [ -f "$target/$hook_file" ]; then
+    rm -f "$target/$hook_file"
+    [ -f "$target/.claude/settings.json" ] && settings_hook remove
+    say "removed the SessionStart re-registration hook"
+  fi
+  exit 0
+fi
+
+if [ "$with_hook" = 1 ]; then
+  mkdir -p "$target/.claude/hooks"
+  cat > "$target/$hook_file" <<'HOOK'
+#!/usr/bin/env bash
+# Installed by gsd-stitch-design: re-register the ui-stitch GSD capability in a fresh cloud
+# container, where the consent record in ~/.gsd does not exist yet. No-op on local machines.
+[ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
+curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh \
+  | bash -s -- "${CLAUDE_PROJECT_DIR:-.}" --register-only >/dev/null 2>&1 || true
+exit 0
+HOOK
+  chmod +x "$target/$hook_file"
+  settings_hook add
+  say "SessionStart hook ready: cloud sessions re-register automatically"
+fi
+
+# Stage what the install wrote so one commit finishes the job.
 git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 staged=()
 for path in \
   .claude/skills/gsd-ui-stitch-phase .claude/skills/gsd-ui-design-pick .claude/skills/.gsd-stitch-design-version \
-  .claude/CLAUDE.md CLAUDE.md .planning/design/design-config.json .planning/config.json .gsd-capabilities.json; do
+  .claude/CLAUDE.md CLAUDE.md .planning/design/design-config.json .planning/config.json .gsd-capabilities.json \
+  "$hook_file" .claude/settings.json; do
   [ -e "$target/$path" ] && git -C "$target" add -- "$path" && staged+=("$path")
 done
 # GSD writes .gsd/.gitignore containing "*", so this one file needs -f.
 cap=".gsd/capabilities/ui-stitch/capability.json"
 [ -f "$target/$cap" ] && git -C "$target" add -f -- "$cap" && staged+=("$cap")
 if [ "${#staged[@]}" -gt 0 ]; then
-  say "staged ${#staged[@]} paths. Finish with:"
-  printf '  git -C %q commit -m "Install gsd-stitch-design %s"\n' "$target" "$ref"
+  say "done. Staged ${#staged[@]} paths; finish with:"
+  printf '  git -C %q commit -m "Install gsd-stitch-design %s" && git -C %q push\n' "$target" "$ref" "$target"
 fi
