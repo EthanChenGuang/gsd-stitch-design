@@ -2,6 +2,20 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.0] - 2026-10-23
+
+Fixes from installing the pack in a project behind a stricter proxy, with a different GSD version.
+
+### Fixed
+
+- Downloads go through git (`git ls-remote` for the newest release, `git clone --depth 1 --branch`), with the release tarball only as a fallback, so the install works where the proxy blocks GitHub release downloads. Running `bootstrap.sh` from a clone of this repository uses that clone and downloads nothing.
+- Registration no longer fails on GSD versions without a step that produces `UI-SPEC.md`: when GSD refuses the step's declared input, the installer registers it again without inputs and prints a NOTE. The skill creates `UI-SPEC.md` itself (through `/gsd-ui-phase`) when it is missing.
+- The SessionStart hook no longer downloads and runs a script. It re-registers from the copy committed in the project (`.gsd/capabilities/ui-stitch/`) with the project's own GSD, and keeps the committed ledger.
+
+### Changed
+
+- The README's main command is `git clone ... && bash .../bootstrap.sh`; `curl | bash` stays as an alternative.
+
 ## [1.4.1] - 2026-10-23
 
 ### Changed

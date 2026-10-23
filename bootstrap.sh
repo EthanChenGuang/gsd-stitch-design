@@ -4,14 +4,15 @@
 #   curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash
 #   curl -fsSL .../bootstrap.sh | bash -s -- [project-dir] [install.sh flags]
 #
-# Downloads the newest release (or GSD_STITCH_REF, e.g. v1.2.0 or main) into
+# Uses the pack it was run from when run from a clone of the repository; otherwise fetches the
+# newest release (or GSD_STITCH_REF, e.g. v1.2.0 or main) through git into
 # ~/.cache/gsd-stitch-design/<ref>, runs install.sh on the project (default: the
 # current directory), then stages every file a normal install writes so one
 # `git commit` finishes the job. Flags such as --dry-run, --register-only,
 # --uninstall, --force and --no-autonomous are passed to install.sh unchanged.
 # It stops without writing anything when GSD or .planning/ is missing (override with
-# --skip-gsd-check). A full install also adds a SessionStart hook that re-registers the capability in
-# fresh cloud containers (skip it with --no-hook); --uninstall removes it again.
+# --skip-gsd-check). A full install also adds a SessionStart hook that re-registers the capability from the
+# committed copy (no download) in fresh cloud containers (skip it with --no-hook); --uninstall removes it again.
 set -euo pipefail
 
 REPO="EthanChenGuang/gsd-stitch-design"
@@ -20,7 +21,7 @@ CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/gsd-stitch-design"
 say() { printf 'gsd-stitch-design: %s\n' "$*"; }
 die() { printf 'gsd-stitch-design: %s\n' "$*" >&2; exit 1; }
 
-command -v curl >/dev/null || die "curl is required"
+command -v git >/dev/null || command -v curl >/dev/null || die "git or curl is required"
 command -v tar >/dev/null || die "tar is required"
 command -v node >/dev/null || die "node is required (the installer and GSD both need it)"
 
@@ -62,27 +63,46 @@ if [ "$check_gsd" = 1 ] && [ "$needs_gsd" = 1 ]; then
   fi
 fi
 
-# Resolve the newest release tag unless a ref was pinned.
-ref="${GSD_STITCH_REF:-}"
-if [ -z "$ref" ]; then
-  ref="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).tag_name||"")}catch{}})' || true)"
+# Use the pack this script came from when it runs from a clone of the repository
+# (bash /path/to/gsd-stitch-design/bootstrap.sh). Otherwise fetch it through git, which works
+# behind proxies that block release downloads, and fall back to the release tarball.
+self="${BASH_SOURCE[0]:-}"
+self_dir=""
+[ -n "$self" ] && [ -f "$self" ] && self_dir="$(cd "$(dirname "$self")" && pwd)"
+if [ -n "$self_dir" ] && [ -f "$self_dir/install.sh" ] && [ -f "$self_dir/capability/ui-stitch/capability.json" ] \
+  && [ -z "${GSD_STITCH_REF:-}" ]; then
+  pack="$self_dir"
+  ref="v$(tr -d '[:space:]' < "$pack/VERSION" 2>/dev/null || echo '?')"
+else
+  url="https://github.com/$REPO"
+  ref="${GSD_STITCH_REF:-}"
+  if [ -z "$ref" ] && command -v git >/dev/null; then
+    ref="$(git ls-remote --tags --refs "$url" 'v*' 2>/dev/null | sed 's|.*refs/tags/||' | sort -V | tail -n 1 || true)"
+  fi
+  if [ -z "$ref" ]; then
+    ref="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).tag_name||"")}catch{}})' || true)"
+  fi
   [ -n "$ref" ] || { ref="main"; say "could not read the latest release; using main"; }
-fi
 
-# A release is immutable, so a cached copy is reused; main is always fetched fresh.
-pack="$CACHE_ROOT/$ref"
-if [ "$ref" = "main" ] || [ ! -f "$pack/install.sh" ]; then
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL "https://github.com/$REPO/archive/$ref.tar.gz" -o "$tmp/pack.tar.gz" \
-    || die "download failed for $ref"
-  mkdir -p "$tmp/pack"
-  tar -xzf "$tmp/pack.tar.gz" -C "$tmp/pack" --strip-components=1
-  [ -f "$tmp/pack/install.sh" ] || die "the download for $ref has no install.sh"
-  rm -rf "$pack"
-  mkdir -p "$CACHE_ROOT"
-  mv "$tmp/pack" "$pack"
+  # A release is immutable, so a cached copy is reused; main is always fetched fresh.
+  pack="$CACHE_ROOT/$ref"
+  if [ "$ref" = "main" ] || [ ! -f "$pack/install.sh" ]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    if ! { command -v git >/dev/null && git clone -q --depth 1 --branch "$ref" "$url" "$tmp/pack" 2>/dev/null; }; then
+      rm -rf "$tmp/pack"
+      curl -fsSL "$url/archive/$ref.tar.gz" -o "$tmp/pack.tar.gz" \
+        || die "could not download $ref with git or curl (check network access to github.com)"
+      mkdir -p "$tmp/pack"
+      tar -xzf "$tmp/pack.tar.gz" -C "$tmp/pack" --strip-components=1
+    fi
+    rm -rf "$tmp/pack/.git"
+    [ -f "$tmp/pack/install.sh" ] || die "the download for $ref has no install.sh"
+    rm -rf "$pack"
+    mkdir -p "$CACHE_ROOT"
+    mv "$tmp/pack" "$pack"
+  fi
 fi
 say "pack $ref ($(cat "$pack/VERSION" 2>/dev/null || echo '?')) from $pack"
 
@@ -132,11 +152,22 @@ if [ "$with_hook" = 1 ]; then
   mkdir -p "$target/.claude/hooks"
   cat > "$target/$hook_file" <<'HOOK'
 #!/usr/bin/env bash
-# Installed by gsd-stitch-design: re-register the ui-stitch GSD capability in a fresh cloud
-# container, where the consent record in ~/.gsd does not exist yet. No-op on local machines.
+# Installed by gsd-stitch-design. A fresh Claude cloud container has no GSD consent record in
+# ~/.gsd, so re-register the ui-stitch capability from the copy committed in this repository.
+# Nothing is downloaded. Does nothing on a local machine.
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh \
-  | bash -s -- "${CLAUDE_PROJECT_DIR:-.}" --register-only >/dev/null 2>&1 || true
+cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
+gsd=.claude/gsd-core/bin/gsd-tools.cjs
+[ -f "$gsd" ] || gsd="$HOME/.claude/gsd-core/bin/gsd-tools.cjs"
+cap=.gsd/capabilities/ui-stitch
+{ [ -f "$gsd" ] && [ -f "$cap/capability.json" ]; } || exit 0
+tmp="$(mktemp -d)"
+cp -R "$cap" "$tmp/ui-stitch"
+[ -f .gsd-capabilities.json ] && cp .gsd-capabilities.json "$tmp/ledger"
+node "$gsd" capability install "$tmp/ui-stitch" --scope project --yes --project-dir "$PWD" >/dev/null 2>&1 || true
+# Only the ledger's timestamp and source path change here; keep the committed version.
+[ -f "$tmp/ledger" ] && cp "$tmp/ledger" .gsd-capabilities.json
+rm -rf "$tmp"
 exit 0
 HOOK
   chmod +x "$target/$hook_file"

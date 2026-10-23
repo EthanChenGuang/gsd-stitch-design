@@ -380,8 +380,29 @@ register_capability() {
   errf="$(mktemp "${TMPDIR:-/tmp}/gsd-sd-cap.XXXXXX")"
   out="$( cd "$TARGET" && node "$GSD_TOOLS" capability install "$CAP_SRC" --scope project --yes --project-dir "$TARGET" --pick status 2>"$errf" )" || rc=$?
   err="$(cat "$errf" 2>/dev/null || true)"
-  rm -f "$errf"
   out="$(printf '%s' "$out" | tr -d '[:space:]')"
+  # Some GSD versions have no capability that produces UI-SPEC.md, so they refuse a step that
+  # consumes it. Register again without the declared inputs: the skill writes UI-SPEC.md itself
+  # (through /gsd-ui-phase) when the file is missing, so only the ordering hint is lost.
+  if ! { [ "$rc" -eq 0 ] && [ "$out" = "installed" ]; } && printf '%s\n%s' "$err" "$out" | grep -q 'which is never produced'; then
+    local loose
+    loose="$(mktemp -d "${TMPDIR:-/tmp}/gsd-sd-cap-loose.XXXXXX")/$CAP_ID"
+    mkdir -p "$loose"
+    cp -R "$CAP_SRC/." "$loose/"
+    node -e '
+      const fs = require("fs"), f = process.argv[1], j = JSON.parse(fs.readFileSync(f, "utf8"))
+      for (const s of j.steps || []) s.consumes = []
+      fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n")' "$loose/capability.json"
+    rc=0
+    out="$( cd "$TARGET" && node "$GSD_TOOLS" capability install "$loose" --scope project --yes --project-dir "$TARGET" --pick status 2>"$errf" )" || rc=$?
+    err="$(cat "$errf" 2>/dev/null || true)"
+    out="$(printf '%s' "$out" | tr -d '[:space:]')"
+    rm -rf "$(dirname "$loose")"
+    if [ "$rc" -eq 0 ] && [ "$out" = "installed" ]; then
+      printf 'NOTE: this GSD has no step that produces UI-SPEC.md; %s was registered without that input (the skill creates UI-SPEC.md itself).\n' "$CAP_ID"
+    fi
+  fi
+  rm -f "$errf"
   if [ "$rc" -eq 0 ] && [ "$out" = "installed" ]; then
     if [ "$had_staged" -eq 1 ]; then
       RESULT="registered"

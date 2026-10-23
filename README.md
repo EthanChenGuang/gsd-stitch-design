@@ -9,7 +9,8 @@
 1. 确认项目是 GSD 项目：有 `.claude/gsd-core/`（或 `~/.claude/gsd-core/`）和 `.planning/config.json`。
    - 没有 GSD：运行 `npx -y @opengsd/gsd-core@latest --claude --local`。
    - 没有 `.planning/`：先运行 `/gsd-new-project`，完成后再继续。
-2. 在项目根目录运行：`curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash`
+2. 在项目根目录运行：`git clone --depth 1 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design && bash /tmp/gsd-stitch-design/bootstrap.sh`
+   - 只用 git，代理拦截 Release 下载或 raw 文件时也能装。已有旧的 `/tmp/gsd-stitch-design` 时先删掉再克隆。
    - 它缺 GSD 或 `.planning/` 时会以退出码 1 停下、什么都不写，并说明缺什么。按提示补上后重新运行。
 3. 提交并推送它暂存的文件：`git commit -m "Install gsd-stitch-design" && git push`（云端会话必须推送，容器结束后未推送的改动会丢失）。
 4. 按项目情况填 `.planning/design/design-config.json`（产品名、语言、设备视口、技术栈、要避开的品牌、`renderer`），然后告诉用户可以运行 `/gsd-ui-design-pick` 开始全局设计。
@@ -46,8 +47,10 @@
 **第 1 步**：在项目根目录运行
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash
+git clone --depth 1 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design && bash /tmp/gsd-stitch-design/bootstrap.sh
 ```
+
+（也可以 `curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/main/bootstrap.sh | bash`；有的云环境代理会拦 curl 下载，git 一般都能用。）
 
 **第 2 步**：提交并推送
 
@@ -55,18 +58,18 @@ curl -fsSL https://raw.githubusercontent.com/EthanChenGuang/gsd-stitch-design/ma
 git commit -m "Install gsd-stitch-design" && git push
 ```
 
-完成。本地和 Claude 云端都能用：第 1 步装好最新版的两个 skill，注册 GSD 能力 `ui-stitch`（`/gsd-autonomous` 会自动跑设计步骤），加一个 SessionStart 钩子让云端每个新容器自动重新注册，并把这些文件全部暂存好。之后按项目填 `.planning/design/design-config.json`。
+完成。本地和 Claude 云端都能用：第 1 步装好最新版的两个 skill，注册 GSD 能力 `ui-stitch`（`/gsd-autonomous` 会自动跑设计步骤），加一个 SessionStart 钩子让云端每个新容器自动重新注册（钩子只用项目里已提交的副本，不联网、不下载任何东西），并把这些文件全部暂存好。之后按项目填 `.planning/design/design-config.json`。
 
 在 Claude 云端会话里不用自己开终端：把上面两步直接告诉 Claude，让它运行即可。
 
-其他操作都是同一条命令加参数（`... | bash -s -- <参数>`）：
+其他操作都是同一个脚本加参数（`bash /tmp/gsd-stitch-design/bootstrap.sh <参数>`，或 `... | bash -s -- <参数>`）：
 
 | 想做什么 | 参数 |
 |---|---|
 | 先预览，不改文件 | `--dry-run` |
 | 升级到最新版 | 不加参数再跑一次（改过已安装的 skill 时加 `--force`） |
 | 卸载（连同钩子） | `--uninstall` |
-| 不要 SessionStart 钩子 | `--no-hook` |
+| 不要 SessionStart 钩子 | `--no-hook`（云端新容器里就要手动重跑第 1 步才会自动跑设计步骤） |
 | 指定项目目录 | 把目录写在参数里，例如 `-- /path/to/project` |
 | 没装 GSD 也要先装 skill | `--skip-gsd-check` |
 | 固定某个版本 | 在 `bash` 前加 `GSD_STITCH_REF=v1.3.0` |

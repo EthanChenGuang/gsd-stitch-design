@@ -22,14 +22,15 @@ jobs:
           bash -n bootstrap.sh
           proj="$(mktemp -d)"
           git -C "$proj" init -q
-          ! GSD_STITCH_REF=main bash bootstrap.sh "$proj"   # no GSD here: must refuse
+          ! bash bootstrap.sh "$proj"   # no GSD here: must refuse
           test ! -e "$proj/.claude/skills"
-          GSD_STITCH_REF=main bash bootstrap.sh "$proj" --no-autonomous --skip-gsd-check
+          bash bootstrap.sh "$proj" --no-autonomous --skip-gsd-check
           test -f "$proj/.claude/skills/gsd-ui-stitch-phase/SKILL.md"
           test -f "$proj/.claude/skills/gsd-ui-design-pick/SKILL.md"
           git -C "$proj" diff --cached --name-only | grep -q gsd-ui-stitch-phase
           test -x "$proj/.claude/hooks/gsd-stitch-design.sh"
+          ! grep -qE 'curl|wget' "$proj/.claude/hooks/gsd-stitch-design.sh"   # the hook never downloads
           grep -q gsd-stitch-design.sh "$proj/.claude/settings.json"
-          GSD_STITCH_REF=main bash bootstrap.sh "$proj" --uninstall
+          bash bootstrap.sh "$proj" --uninstall
           test ! -e "$proj/.claude/hooks/gsd-stitch-design.sh"
           test ! -e "$proj/.claude/settings.json"
