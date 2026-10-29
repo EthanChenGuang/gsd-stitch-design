@@ -2,6 +2,21 @@
 
 All notable changes to the gsd-stitch-design pack are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-10-29
+
+First-class Cursor support, generalized from the in-project Cursor port, without project-specific ids.
+
+### Added
+
+- Cursor variants of `gsd-ui-design-pick` and `gsd-ui-stitch-phase` under `cursor/skills/` (Claude originals unchanged). GSD resolution prefers `.cursor/gsd-core` via the `.cursor/bin/gsd-run` shim. Stitch tools are the 14 Google Stitch MCP tools on namespace `Google_Stitch`, not Claude `mcp__Google_Stitch__*` / `ToolSearch`. Headless / cloud-agent sessions stop, commit and push, and report the question, options and recommended option instead of auto-picking.
+- `install.sh --cursor`: copies Cursor skills into `.cursor/skills/`, merges `Google_Stitch` into `.cursor/mcp.json` (`https://stitch.googleapis.com/mcp`, `X-Goog-Api-Key: ${env:STITCH_API_KEY}`) without clobbering other servers, installs `.cursor/rules/gsd-stitch-design.mdc` and `.cursor/bin/gsd-run`, registers the `ui-stitch` `plan:pre` hook, sets `workflow.ui_stitch=true` / `ui_stitch_auto=false`, and writes `.cursor/skills/.gsd-stitch-design-version`. New `design-config.json` gets `"renderer": "stitch"`. Idempotent. Claude install (no `--cursor`) is unchanged.
+- `cursor/scripts/register-ui-stitch.sh` and the GSD 1.19.0 workaround in the Cursor rule: if `{NN}-SCREENS.md` is missing, still run stitch-phase even when UI-SPEC exists (GSD skips all UI `plan:pre` hooks when `hasUiSpec` is true).
+- README Cursor section and `docs/CURSOR-BOT-PROMPT.md` (copy-paste prompt for a Cursor coding bot to install/upgrade this pack into its repo via a PR). Documents `STITCH_API_KEY` from https://stitch.withgoogle.com/settings, Cursor Cloud Agents secrets at https://cursor.com/dashboard?tab=cloud-agents, and that the key must never be committed.
+
+### Changed
+
+- Pack version 1.6.0 (`VERSION`, capability manifest, changelog).
+
 ## [1.5.0] - 2026-10-23
 
 Fixes from installing the pack in a project behind a stricter proxy, with a different GSD version.

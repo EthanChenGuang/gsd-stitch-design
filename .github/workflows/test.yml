@@ -34,3 +34,15 @@ jobs:
           bash bootstrap.sh "$proj" --uninstall
           test ! -e "$proj/.claude/hooks/gsd-stitch-design.sh"
           test ! -e "$proj/.claude/settings.json"
+          proj2="$(mktemp -d)"
+          git -C "$proj2" init -q
+          bash bootstrap.sh "$proj2" --cursor --no-autonomous --skip-gsd-check
+          test -f "$proj2/.cursor/skills/gsd-ui-stitch-phase/SKILL.md"
+          test -f "$proj2/.cursor/skills/gsd-ui-design-pick/SKILL.md"
+          test -x "$proj2/.cursor/bin/gsd-run"
+          test -f "$proj2/.cursor/rules/gsd-stitch-design.mdc"
+          node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if (!j.mcpServers.Google_Stitch) process.exit(1)' "$proj2/.cursor/mcp.json"
+          git -C "$proj2" diff --cached --name-only | grep -q gsd-ui-stitch-phase
+          test ! -e "$proj2/.claude/skills"
+          bash bootstrap.sh "$proj2" --cursor --uninstall --skip-gsd-check
+          test ! -e "$proj2/.cursor/skills/gsd-ui-stitch-phase"

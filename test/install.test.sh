@@ -69,6 +69,10 @@ assert_rc() { # assert_rc <expected> <message>
 # ---------------------------------------------------------------------------
 bash -n "$INSTALL" || fail "bash -n install.sh"
 ok "static: bash -n install.sh"
+bash -n "$PACK_DIR/bootstrap.sh" || fail "bash -n bootstrap.sh"
+bash -n "$PACK_DIR/cursor/bin/gsd-run" || fail "bash -n cursor/bin/gsd-run"
+bash -n "$PACK_DIR/cursor/scripts/register-ui-stitch.sh" || fail "bash -n register-ui-stitch.sh"
+ok "static: bash -n bootstrap + cursor shims"
 
 CJS_COUNT=0
 while IFS= read -r f; do
@@ -96,6 +100,45 @@ node -e '
 ' "$PACK_DIR/capability/ui-stitch/capability.json" "$PACK_DIR/VERSION" \
   || fail "capability.json check failed"
 ok "static: capability.json parses, version matches VERSION"
+
+node --check "$PACK_DIR/cursor/adapt-skills.cjs" || fail "node --check cursor/adapt-skills.cjs"
+GEN="$TMP/generated-cursor"
+mkdir -p "$GEN"
+node "$PACK_DIR/cursor/adapt-skills.cjs" "$GEN" >/dev/null
+cmp -s "$GEN/cursor/skills/gsd-ui-stitch-phase/SKILL.md" "$PACK_DIR/cursor/skills/gsd-ui-stitch-phase/SKILL.md" \
+  || fail "cursor/adapt-skills.cjs output differs from cursor/skills/gsd-ui-stitch-phase/SKILL.md"
+cmp -s "$GEN/cursor/skills/gsd-ui-design-pick/SKILL.md" "$PACK_DIR/cursor/skills/gsd-ui-design-pick/SKILL.md" \
+  || fail "cursor/adapt-skills.cjs output differs from cursor/skills/gsd-ui-design-pick/SKILL.md"
+ok "static: cursor skills match cursor/adapt-skills.cjs"
+
+node -e '
+  const fs = require("fs");
+  const bad = [];
+  for (const rel of ["cursor/skills/gsd-ui-stitch-phase/SKILL.md", "cursor/skills/gsd-ui-design-pick/SKILL.md"]) {
+    const t = fs.readFileSync(process.argv[1] + "/" + rel, "utf8");
+    if (!t.includes("<cursor_skill_adapter>")) bad.push(rel + " missing adapter");
+    if (!t.includes("<cursor_gates>")) bad.push(rel + " missing cursor_gates");
+    if (/\n---\n[\s\S]*allowed-tools:/.test(t)) bad.push(rel + " still has allowed-tools");
+    if (t.includes("paperpro") || t.includes("Paperpro")) bad.push(rel + " leaks paperpro");
+  }
+  const stitch = fs.readFileSync(process.argv[1] + "/cursor/skills/gsd-ui-stitch-phase/SKILL.md", "utf8");
+  if (!stitch.includes(".cursor/bin/gsd-run")) bad.push("stitch skill missing gsd-run");
+  if (!stitch.includes("Google_Stitch")) bad.push("stitch skill missing Google_Stitch");
+  const tools = ["create_project","get_project","list_projects","generate_screen_from_text","get_screen","list_screens","edit_screens","generate_variants","upload_design_md","create_design_system_from_design_md","list_design_systems","apply_design_system","update_design_system","download_file"];
+  for (const n of tools) if (!stitch.includes(n)) bad.push("missing stitch tool " + n);
+  if (bad.length) { console.error(bad.join("; ")); process.exit(1); }
+' "$PACK_DIR" || fail "cursor SKILL.md checks"
+ok "static: cursor skills have adapter, gates, 14 Stitch tools, no paperpro"
+
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$PACK_DIR/cursor/mcp-google-stitch.json" \
+  || fail "cursor/mcp-google-stitch.json is not valid JSON"
+node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const s = j.mcpServers && j.mcpServers.Google_Stitch;
+  if (!s || s.url !== "https://stitch.googleapis.com/mcp") process.exit(1);
+  if (!s.headers || s.headers["X-Goog-Api-Key"] !== "${env:STITCH_API_KEY}") process.exit(1);
+' "$PACK_DIR/cursor/mcp-google-stitch.json" || fail "mcp fragment shape"
+ok "static: Cursor Stitch MCP fragment"
 
 # ---------------------------------------------------------------------------
 # contrast
@@ -647,6 +690,156 @@ else
     assert_hooks_in "$TMP/clone b" absent "G6b hooks after uninstall"
     ok "G6: ledger-only clone -> active, status '?? .gsd/'; nothing-committed clone -> active, both untracked; uninstall works in both"
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# scenario H: --cursor install (skills, mcp merge, rule, gsd-run, idempotency)
+# ---------------------------------------------------------------------------
+H="$TMP/cursor project"
+mkdir -p "$H/.planning" "$H/.cursor"
+printf '{"workflow":{"ui_phase":false,"research":true},"commit_docs":true}\n' > "$H/.planning/config.json"
+printf '{"mcpServers":{"already":{"command":"echo"}}}\n' > "$H/.cursor/mcp.json"
+
+run bash "$INSTALL" "$H" --cursor --dry-run
+assert_rc 0 "H1 dry-run cursor"
+case "$OUT" in *"[dry-run]"*) ;; *) fail "H1 dry-run output lacks [dry-run]: $OUT" ;; esac
+[ ! -d "$H/.cursor/skills" ] || fail "H1 dry-run created .cursor/skills"
+[ ! -f "$H/.cursor/bin/gsd-run" ] || fail "H1 dry-run created gsd-run"
+node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if (j.mcpServers.Google_Stitch) process.exit(1); if (!j.mcpServers.already) process.exit(1);' "$H/.cursor/mcp.json" \
+  || fail "H1 dry-run mutated mcp.json"
+ok "H1: --cursor --dry-run writes nothing"
+
+run bash "$INSTALL" "$H" --cursor --no-autonomous
+assert_rc 0 "H2 cursor install"
+[ -f "$H/.cursor/skills/gsd-ui-stitch-phase/SKILL.md" ] || fail "H2 missing stitch SKILL.md"
+[ -f "$H/.cursor/skills/gsd-ui-design-pick/SKILL.md" ] || fail "H2 missing pick SKILL.md"
+cmp -s "$PACK_DIR/cursor/skills/gsd-ui-stitch-phase/SKILL.md" "$H/.cursor/skills/gsd-ui-stitch-phase/SKILL.md" \
+  || fail "H2 Cursor SKILL.md differs from pack"
+cmp -s "$PACK_DIR/skills/gsd-ui-stitch-phase/scripts/contrast.cjs" "$H/.cursor/skills/gsd-ui-stitch-phase/scripts/contrast.cjs" \
+  || fail "H2 contrast.cjs not copied from pack scripts"
+[ ! -d "$H/.claude/skills" ] || fail "H2 --cursor created .claude/skills"
+assert_eq "$(tr -d '[:space:]' < "$PACK_DIR/VERSION")" "$(tr -d '[:space:]' < "$H/.cursor/skills/.gsd-stitch-design-version")" "H2 cursor version file"
+[ -x "$H/.cursor/bin/gsd-run" ] || fail "H2 gsd-run not executable"
+[ -f "$H/.cursor/rules/gsd-stitch-design.mdc" ] || fail "H2 missing rule"
+grep -q 'SCREENS.md' "$H/.cursor/rules/gsd-stitch-design.mdc" || fail "H2 rule missing SCREENS.md workaround"
+node -e '
+  const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const m = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+  const bad = [];
+  if (c.workflow.ui_phase !== true) bad.push("ui_phase");
+  if (c.workflow.ui_stitch !== true) bad.push("ui_stitch");
+  if (c.workflow.ui_stitch_auto !== false) bad.push("ui_stitch_auto");
+  if (c.workflow.research !== true) bad.push("research clobbered");
+  if (!m.mcpServers.already) bad.push("clobbered other mcp server");
+  const s = m.mcpServers.Google_Stitch;
+  if (!s || s.url !== "https://stitch.googleapis.com/mcp") bad.push("stitch url");
+  if (!s || s.headers["X-Goog-Api-Key"] !== "${env:STITCH_API_KEY}") bad.push("api key header");
+  const raw = require("fs").readFileSync(process.argv[2], "utf8");
+  if (/AIza|sk-|GOOG[A-Z0-9]/i.test(raw) && !raw.includes("${env:STITCH_API_KEY}")) bad.push("looks like a committed key");
+  if (bad.length) { console.error(bad.join("; ")); process.exit(1); }
+' "$H/.planning/config.json" "$H/.cursor/mcp.json" || fail "H2 config/mcp"
+node -e '
+  const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (d.renderer !== "stitch") process.exit(1);
+' "$H/.planning/design/design-config.json" || fail "H2 new design-config renderer is not stitch"
+ok "H2: --cursor installs skills, merges mcp, rule, gsd-run, renderer=stitch; leaves Claude skills absent"
+
+H_CFG="$(hash_file "$H/.planning/config.json")"
+H_MCP="$(hash_file "$H/.cursor/mcp.json")"
+H_RULE="$(hash_file "$H/.cursor/rules/gsd-stitch-design.mdc")"
+H_RUN="$(hash_file "$H/.cursor/bin/gsd-run")"
+H_DC="$(hash_file "$H/.planning/design/design-config.json")"
+run bash "$INSTALL" "$H" --cursor --no-autonomous
+assert_rc 0 "H3 cursor reinstall"
+assert_eq "$H_CFG" "$(hash_file "$H/.planning/config.json")" "H3 config changed"
+assert_eq "$H_MCP" "$(hash_file "$H/.cursor/mcp.json")" "H3 mcp.json changed"
+assert_eq "$H_RULE" "$(hash_file "$H/.cursor/rules/gsd-stitch-design.mdc")" "H3 rule changed"
+assert_eq "$H_RUN" "$(hash_file "$H/.cursor/bin/gsd-run")" "H3 gsd-run changed"
+assert_eq "$H_DC" "$(hash_file "$H/.planning/design/design-config.json")" "H3 design-config overwritten"
+ok "H3: --cursor reinstall is idempotent"
+
+# Existing design-config is never overwritten even if renderer is auto.
+node -e '
+  const fs = require("fs");
+  const c = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  c.renderer = "html";
+  c.product_name = "Keep Me";
+  fs.writeFileSync(process.argv[1], JSON.stringify(c, null, 2) + "\n");
+' "$H/.planning/design/design-config.json"
+run bash "$INSTALL" "$H" --cursor --no-autonomous
+assert_rc 0 "H4 keep design-config"
+grep -q '"Keep Me"' "$H/.planning/design/design-config.json" || fail "H4 product_name lost"
+grep -q '"html"' "$H/.planning/design/design-config.json" || fail "H4 renderer overwritten"
+ok "H4: --cursor never overwrites design-config.json"
+
+# Conflict on a Cursor skill file
+printf '\n# local cursor edit\n' >> "$H/.cursor/skills/gsd-ui-stitch-phase/SKILL.md"
+run bash "$INSTALL" "$H" --cursor --no-autonomous
+assert_rc 3 "H5 cursor conflict without --force"
+run bash "$INSTALL" "$H" --cursor --no-autonomous --force
+assert_rc 0 "H5 cursor --force"
+cmp -s "$PACK_DIR/cursor/skills/gsd-ui-stitch-phase/SKILL.md" "$H/.cursor/skills/gsd-ui-stitch-phase/SKILL.md" \
+  || fail "H5 --force did not restore Cursor SKILL.md"
+ok "H5: Cursor skill conflict -> exit 3; --force restores"
+
+# Uninstall --cursor leaves a parallel Claude install alone and keeps other MCP servers
+mkdir -p "$H/.claude/skills/gsd-ui-stitch-phase"
+printf '# claude copy\n' > "$H/.claude/skills/gsd-ui-stitch-phase/SKILL.md"
+run bash "$INSTALL" "$H" --cursor --uninstall --dry-run
+assert_rc 0 "H6 uninstall dry-run"
+[ -f "$H/.cursor/skills/gsd-ui-stitch-phase/SKILL.md" ] || fail "H6 dry-run removed skills"
+run bash "$INSTALL" "$H" --cursor --uninstall
+assert_rc 0 "H6 uninstall"
+[ ! -e "$H/.cursor/skills/gsd-ui-stitch-phase" ] || fail "H6 cursor skill still present"
+[ ! -e "$H/.cursor/bin/gsd-run" ] || fail "H6 gsd-run still present"
+[ ! -e "$H/.cursor/rules/gsd-stitch-design.mdc" ] || fail "H6 rule still present"
+[ -f "$H/.claude/skills/gsd-ui-stitch-phase/SKILL.md" ] || fail "H6 Claude skill was removed"
+node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  if (m.mcpServers.Google_Stitch) process.exit(1);
+  if (!m.mcpServers.already) process.exit(1);
+' "$H/.cursor/mcp.json" || fail "H6 mcp.json after uninstall"
+[ -f "$H/.planning/design/design-config.json" ] || fail "H6 design-config removed"
+ok "H6: --cursor --uninstall removes Cursor files, keeps Claude skills and other MCP servers"
+
+# Guarded: register the hook against a real Cursor GSD copy
+CURSOR_GSD_SRC=""
+if [ -f "${GSD_CORE_SRC:-}/bin/gsd-tools.cjs" ]; then
+  CURSOR_GSD_SRC="$GSD_CORE_SRC"
+elif [ -f "$PACK_DIR/../../.cursor/gsd-core/bin/gsd-tools.cjs" ]; then
+  CURSOR_GSD_SRC="$(cd "$PACK_DIR/../../.cursor/gsd-core" && pwd -P)"
+fi
+# Also accept a GSD Core for Cursor tree (gsd-tools lives at gsd-core/bin).
+if [ -z "$CURSOR_GSD_SRC" ]; then
+  for cand in /tmp/gsd-core-inspect.*/.cursor/gsd-core; do
+    if [ -f "$cand/bin/gsd-tools.cjs" ]; then CURSOR_GSD_SRC="$(cd "$cand" && pwd -P)"; break; fi
+  done
+fi
+if [ -z "$CURSOR_GSD_SRC" ] || [ ! -f "$CURSOR_GSD_SRC/bin/gsd-tools.cjs" ]; then
+  printf 'skip - cursor capability integration (no GSD; set GSD_CORE_SRC)\n'
+else
+  HG="$TMP/cursor gsd"
+  mkdir -p "$HG/.planning" "$HG/.cursor"
+  printf '{"workflow":{"ui_phase":true}}\n' > "$HG/.planning/config.json"
+  cp -R "$CURSOR_GSD_SRC" "$HG/.cursor/gsd-core"
+  if [ -d "$(dirname "$CURSOR_GSD_SRC")/scripts" ]; then
+    cp -R "$(dirname "$CURSOR_GSD_SRC")/scripts" "$HG/.cursor/scripts"
+  fi
+  mkdir -p "$TMP/gsdhome-h"
+  export GSD_HOME="$TMP/gsdhome-h"
+  run bash "$INSTALL" "$HG" --cursor
+  assert_rc 0 "H7 cursor install with GSD"
+  case "$OUT" in *"WARN: could not register"*) fail "H7 registration warning: $OUT" ;; esac
+  [ -f "$HG/.gsd/capabilities/ui-stitch/capability.json" ] || fail "H7 capability not staged"
+  hooks="$(node "$HG/.cursor/gsd-core/bin/gsd-tools.cjs" loop render-hooks plan:pre --raw --project-dir "$HG" 2>/dev/null || true)"
+  printf '%s' "$hooks" | node -e '
+    let d=""; process.stdin.on("data",c=>d+=c).on("end",()=>{
+      let h; try { h = JSON.parse(d).activeHooks; } catch (e) { console.error("unparsable"); process.exit(1); }
+      const st = (h||[]).some((e)=>e.kind==="step" && e.capId==="ui-stitch" && e.ref && e.ref.skill==="ui-stitch-phase");
+      process.exit(st ? 0 : 1);
+    });
+  ' || fail "H7 plan:pre hooks do not include ui-stitch-phase. Hooks: $hooks"
+  ok "H7: --cursor registers ui-stitch plan:pre hook against GSD Core for Cursor"
 fi
 
 printf 'ALL TESTS PASSED\n'

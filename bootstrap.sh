@@ -46,14 +46,25 @@ needs_gsd=1
 for arg in ${flags[@]+"${flags[@]}"}; do
   case "$arg" in --uninstall|-h|--help) needs_gsd=0 ;; esac
 done
+want_cursor=0
+for arg in ${flags[@]+"${flags[@]}"}; do
+  case "$arg" in --cursor) want_cursor=1 ;; esac
+done
+
 if [ "$check_gsd" = 1 ] && [ "$needs_gsd" = 1 ]; then
   missing=()
-  if [ ! -f "$target/.claude/gsd-core/bin/gsd-tools.cjs" ] && [ ! -f "$HOME/.claude/gsd-core/bin/gsd-tools.cjs" ] \
+  if [ "$want_cursor" = 1 ]; then
+    if [ ! -f "$target/.cursor/gsd-core/bin/gsd-tools.cjs" ] && [ ! -f "$HOME/.cursor/gsd-core/bin/gsd-tools.cjs" ] \
+      && [ ! -f "$target/.claude/gsd-core/bin/gsd-tools.cjs" ] && [ ! -f "$HOME/.claude/gsd-core/bin/gsd-tools.cjs" ] \
+      && ! command -v gsd_run >/dev/null 2>&1; then
+      missing+=("GSD Core for Cursor is not installed (no .cursor/gsd-core in the project or in ~/.cursor). Install it: npx -y @opengsd/gsd-core@latest --cursor --local")
+    fi
+  elif [ ! -f "$target/.claude/gsd-core/bin/gsd-tools.cjs" ] && [ ! -f "$HOME/.claude/gsd-core/bin/gsd-tools.cjs" ] \
     && ! command -v gsd_run >/dev/null 2>&1; then
     missing+=("GSD is not installed (no .claude/gsd-core in the project or in ~/.claude). Install it: npx -y @opengsd/gsd-core@latest --claude --local")
   fi
   if [ ! -f "$target/.planning/config.json" ]; then
-    missing+=("this is not a GSD project yet (no .planning/config.json). Run /gsd-new-project in Claude Code first.")
+    missing+=("this is not a GSD project yet (no .planning/config.json). Run gsd-new-project first.")
   fi
   if [ "${#missing[@]}" -gt 0 ]; then
     printf 'gsd-stitch-design: ERROR: nothing was installed in %s\n' "$target" >&2
@@ -148,7 +159,7 @@ if [ "$mode" = uninstall ]; then
   exit 0
 fi
 
-if [ "$with_hook" = 1 ]; then
+if [ "$with_hook" = 1 ] && [ "$want_cursor" = 0 ]; then
   mkdir -p "$target/.claude/hooks"
   cat > "$target/$hook_file" <<'HOOK'
 #!/usr/bin/env bash
@@ -178,12 +189,21 @@ fi
 # Stage what the install wrote so one commit finishes the job.
 git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 staged=()
-for path in \
-  .claude/skills/gsd-ui-stitch-phase .claude/skills/gsd-ui-design-pick .claude/skills/.gsd-stitch-design-version \
-  .claude/CLAUDE.md CLAUDE.md .planning/design/design-config.json .planning/config.json .gsd-capabilities.json \
-  "$hook_file" .claude/settings.json; do
-  [ -e "$target/$path" ] && git -C "$target" add -- "$path" && staged+=("$path")
-done
+if [ "$want_cursor" = 1 ]; then
+  for path in \
+    .cursor/skills/gsd-ui-stitch-phase .cursor/skills/gsd-ui-design-pick .cursor/skills/.gsd-stitch-design-version \
+    .cursor/mcp.json .cursor/rules/gsd-stitch-design.mdc .cursor/bin/gsd-run .cursor/bin/register-ui-stitch.sh \
+    .planning/design/design-config.json .planning/config.json .gsd-capabilities.json; do
+    [ -e "$target/$path" ] && git -C "$target" add -- "$path" && staged+=("$path")
+  done
+else
+  for path in \
+    .claude/skills/gsd-ui-stitch-phase .claude/skills/gsd-ui-design-pick .claude/skills/.gsd-stitch-design-version \
+    .claude/CLAUDE.md CLAUDE.md .planning/design/design-config.json .planning/config.json .gsd-capabilities.json \
+    "$hook_file" .claude/settings.json; do
+    [ -e "$target/$path" ] && git -C "$target" add -- "$path" && staged+=("$path")
+  done
+fi
 # GSD writes .gsd/.gitignore containing "*", so this one file needs -f.
 cap=".gsd/capabilities/ui-stitch/capability.json"
 [ -f "$target/$cap" ] && git -C "$target" add -f -- "$cap" && staged+=("$cap")
