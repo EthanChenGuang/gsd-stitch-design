@@ -1,6 +1,6 @@
 # gsd-stitch-design
 
-给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.1.1），变更记录见 `CHANGELOG.md`。
+给 GSD 项目用的「全局设计 + 每阶段界面设计稿」工作流，打包成两个可移植的 skill，一条命令装进任何 GSD 项目。当前版本见 `VERSION`（1.6.0），变更记录见 `CHANGELOG.md`。支持 Claude Code 与 Cursor（含无头云端 agent）。
 
 ## 让 Claude 安装（给 AI 助手的步骤）
 
@@ -14,6 +14,23 @@
    - 它缺 GSD 或 `.planning/` 时会以退出码 1 停下、什么都不写，并说明缺什么。按提示补上后重新运行。
 3. 提交并推送它暂存的文件：`git commit -m "Install gsd-stitch-design" && git push`（云端会话必须推送，容器结束后未推送的改动会丢失）。
 4. 按项目情况填 `.planning/design/design-config.json`（产品名、语言、设备视口、技术栈、要避开的品牌、`renderer`），然后告诉用户可以运行 `/gsd-ui-design-pick` 开始全局设计。
+
+## 让 Cursor 安装（给 Cursor 云端 / 桌面 agent 的步骤）
+
+GSD Core for Cursor（1.19.0+，装在 `.cursor/` 下）用这一套，不要走上面的 Claude 路径。给 agent 的完整可粘贴说明见 [`docs/CURSOR-BOT-PROMPT.md`](docs/CURSOR-BOT-PROMPT.md)。
+
+1. 确认项目是 GSD 项目：有 `.cursor/gsd-core/`（或 `~/.cursor/gsd-core/`）和 `.planning/config.json`。
+   - 没有 GSD：运行 `npx -y @opengsd/gsd-core@latest --cursor --local`。
+   - 没有 `.planning/`：先运行 `gsd-new-project`，完成后再继续。
+2. 在项目根目录运行：`git clone --depth 1 https://github.com/EthanChenGuang/gsd-stitch-design /tmp/gsd-stitch-design && bash /tmp/gsd-stitch-design/bootstrap.sh --cursor`
+   - 已有旧的 `/tmp/gsd-stitch-design` 时先删掉再克隆。缺 GSD 或 `.planning/` 时退出码 1，什么都不写。
+3. 提交并推送：`git commit -m "Install gsd-stitch-design (Cursor)" && git push`（云端会话必须推送）。
+4. 填 `.planning/design/design-config.json`。Cursor 安装在**新建**该文件时默认 `"renderer": "stitch"`：Stitch 没连上就停下来，不会悄悄改用 html。
+5. **Stitch API key**（生成界面需要，安装本身不需要）：在 https://stitch.withgoogle.com/settings（API Keys）用**拥有该项目 Stitch 项目的 Google 账号**创建密钥，设为环境变量 `STITCH_API_KEY`。Cursor 云端 agent 在 https://cursor.com/dashboard?tab=cloud-agents 加同名 secret；桌面版设在本地环境。安装器写入 `.cursor/mcp.json` 的 `Google_Stitch` 服务器（`https://stitch.googleapis.com/mcp`，请求头 `X-Goog-Api-Key: ${env:STITCH_API_KEY}`），**不要把 key 提交进仓库**。
+
+手动安装：`bash /tmp/gsd-stitch-design/install.sh /path/to/project --cursor`。可重复运行（幂等）。`--cursor --uninstall` 只卸 Cursor 侧文件，不动 `.claude/skills/`。
+
+GSD 1.19.0 在已有 `{NN}-UI-SPEC.md` 时会跳过全部 UI `plan:pre` 钩子。规则文件 `.cursor/rules/gsd-stitch-design.mdc` 要求：若 `{NN}-SCREENS.md` 缺失，仍然运行 `gsd-ui-stitch-phase`。没有交互用户时，每个问题都是：停下、提交并推送当前状态、汇报问题原文、选项和推荐项；不要悄悄选非推荐路径。
 
 ## 这是什么
 
@@ -35,7 +52,7 @@
 ## 前提条件
 
 - **GSD 已安装**：项目内有 `.claude/gsd-core`，或用户目录有 `$HOME/.claude/gsd-core`，或 PATH 上有 `gsd_run`。没有也能安装，但 skill 运行时会停下来提示。
-- **Google Stitch MCP**（可选）：只有渲染方式用 Stitch 时才需要；用 html 渲染器完全不需要。确认方法：在 Claude Code 里运行 `/mcp`，看列表里有没有 Stitch；工具名形如 `mcp__Google_Stitch__generate_screen_from_text`。如果服务器用了别的名字，skill 会再按 `generate_screen_from_text` 搜一次并改用实际前缀。怎么连接 Stitch，请以 Google Stitch 官方说明为准，本包不提供连接地址。
+- **Google Stitch MCP**（可选；Cursor 默认 `renderer: stitch` 时则必需）：只有渲染方式用 Stitch 时才需要；用 html 渲染器完全不需要。Claude Code：运行 `/mcp`，看列表里有没有 Stitch；工具名形如 `mcp__Google_Stitch__generate_screen_from_text`。Cursor：`.cursor/mcp.json` 里的 `Google_Stitch` 服务器（`https://stitch.googleapis.com/mcp`），工具通过 MCP 命名空间 `Google_Stitch` 调用（14 个工具名见 `docs/CURSOR-BOT-PROMPT.md`）。密钥是环境变量 `STITCH_API_KEY`，在 https://stitch.withgoogle.com/settings 创建，**不要提交**。
 - **Node**（>= 18）：三个脚本和安装器里的 JSON 编辑都用 node。
 - **Playwright**（可选，html 渲染器截图用）：`npm i -D playwright`，然后 `npx playwright install chromium`。没有时 html 文件照样生成，只是没有 PNG。
 - **git 和 GitHub 访问**：`/gsd-ui-design-pick` 要克隆 `https://github.com/VoltAgent/awesome-design-md`。
@@ -72,6 +89,7 @@ git commit -m "Install gsd-stitch-design" && git push
 | 不要 SessionStart 钩子 | `--no-hook`（云端新容器里就要手动重跑第 1 步才会自动跑设计步骤） |
 | 指定项目目录 | 把目录写在参数里，例如 `-- /path/to/project` |
 | 没装 GSD 也要先装 skill | `--skip-gsd-check` |
+| 装到 Cursor（`.cursor/skills/` + Stitch MCP + 规则 + `gsd-run`） | `--cursor` |
 | 固定某个版本 | 在 `bash` 前加 `GSD_STITCH_REF=v1.3.0` |
 
 想先读脚本再运行：把 `bootstrap.sh` 下载下来看过，再 `bash bootstrap.sh`。注意第 1 步会整个暂存 `.claude/CLAUDE.md`、`.claude/settings.json` 和 `.planning/config.json`，里面若有你自己的未提交改动，提交前用 `git diff --cached` 看一下。
@@ -95,6 +113,10 @@ bash /tmp/gsd-stitch-design/install.sh /path/to/project
 | `.claude/CLAUDE.md`（没有就用根目录 `CLAUDE.md`，都没有就新建 `.claude/CLAUDE.md`） | 插入或更新一段 `<!-- gsd-stitch-design:start -->` 到 `<!-- gsd-stitch-design:end -->` 之间的「UI Design Workflow」说明，标记之外的内容不动。 |
 | `.planning/config.json` | 把 `workflow.ui_phase` 设为 `true`，其他键保持不变；文件不存在或不是合法 JSON 时只给出警告。 |
 | `.claude/skills/.gsd-stitch-design-version` | 写入包的版本号。 |
+| **仅 `--cursor`：** `.cursor/skills/` 两个 skill、`.cursor/skills/.gsd-stitch-design-version` | 复制 Cursor 版 SKILL.md 和脚本；版本号写在 `.cursor/skills/` 下。 |
+| **仅 `--cursor`：** `.cursor/mcp.json` | 合并 `Google_Stitch` 服务器（`https://stitch.googleapis.com/mcp`，`X-Goog-Api-Key: ${env:STITCH_API_KEY}`），不覆盖其他 MCP 服务器，不写入密钥。 |
+| **仅 `--cursor`：** `.cursor/rules/gsd-stitch-design.mdc`、`.cursor/bin/gsd-run`、`.cursor/bin/register-ui-stitch.sh` | Cursor 规则（含 GSD 1.19.0 UI-SPEC 跳过的变通办法）、GSD 解析 shim（优先 `.cursor/gsd-core`）、钩子重新注册脚本。 |
+| **仅 `--cursor`：** `.planning/config.json` | 另设 `workflow.ui_stitch=true`；`ui_stitch_auto` 仅在缺失时设为 `false`。新建的 `design-config.json` 默认 `renderer=stitch`。不改 CLAUDE.md。 |
 | `.gsd/capabilities/ui-stitch/capability.json`、`.gsd-capabilities.json` | 由 GSD 命令行（`capability install`）写入：注册 GSD 能力 `ui-stitch`，详见「接入 /gsd-autonomous」。需要 `.planning/` 和 GSD；缺少时只警告。用 `--no-autonomous` 可以不注册。两个文件都要提交：登记册用普通 `git add`，manifest 用 `git add -f .gsd/capabilities/ui-stitch/capability.json`，原因见「该提交哪些文件」。登记册被 git 跟踪，且和 HEAD 相比只有易变字段（顶层 `updatedAt`、条目的 `source`）不同时，安装器会还原已提交的版本，并打印 `= .gsd-capabilities.json (only volatile fields changed; restored)`；真正的变化（例如版本号升级）会保留，并用 `~` 打印。`--dry-run` 只打印「会做这项检查」。 |
 | `$GSD_HOME/.gsd/consent.json`（`GSD_HOME` 默认是 `~`，在项目之外） | 本机的授权记录，按项目绝对路径记录，不属于项目，不要提交。 |
 
@@ -107,6 +129,7 @@ bash /tmp/gsd-stitch-design/install.sh /path/to/project
 | `--uninstall` | 卸载，见下文（同时移除能力注册） |
 | `--no-autonomous` | 安装 skill，但不注册 GSD 能力 `ui-stitch` |
 | `--register-only` | 只（重新）注册 GSD 能力 `ui-stitch`，用于新机器或云端会话；不复制 skill，不改 CLAUDE.md、`.planning/config.json` 和版本文件。不能与 `--uninstall`、`--no-autonomous` 同用（退出码 2）；`--force` 被忽略 |
+| `--cursor` | 安装到 Cursor：skill 进 `.cursor/skills/`，合并 Stitch MCP，写入规则和 `gsd-run` shim，用 `.cursor/gsd-core` 注册钩子。默认为 Claude 安装，行为不变 |
 | `-h`、`--help` | 显示用法 |
 
 输出行前缀：`+` 新建，`~` 更新，`=` 无变化，`-` 删除，`WARN:` 警告，`CONFLICT:` 冲突文件。退出码：0 成功，1 出错（目标不是目录、没有 node、标记不成对等），2 用法错误，3 因冲突拒绝。能力注册出任何问题（没有 GSD、没有 `.planning/`、注册命令失败）都只打印 `WARN:` 和一行重新注册命令，退出码仍是 0。
@@ -327,7 +350,7 @@ bash install.sh /path/to/project --uninstall --dry-run   # 先预览
 bash install.sh /path/to/project --uninstall
 ```
 
-会删除：GSD 能力注册（执行 `capability remove ui-stitch`，同时删掉 `.gsd/capabilities/ui-stitch` 和本机授权记录；`.gsd-capabilities.json` 文件保留，其中的 entries 变成空对象）、两个 skill 目录、`CLAUDE.md` 里标记之间的那一段（连同它前面的一个空行，所以安装再卸载后文件内容和原来逐字节一致；删完变成空文件就一并删除）、版本文件。
+会删除：GSD 能力注册（执行 `capability remove ui-stitch`，同时删掉 `.gsd/capabilities/ui-stitch` 和本机授权记录；`.gsd-capabilities.json` 文件保留，其中的 entries 变成空对象）、两个 skill 目录、`CLAUDE.md` 里标记之间的那一段（连同它前面的一个空行，所以安装再卸载后文件内容和原来逐字节一致；删完变成空文件就一并删除）、版本文件。`--cursor --uninstall` 另外删除 `.cursor/mcp.json` 里的 `Google_Stitch` 条目（有其他服务器就保留文件）、规则、`gsd-run` shim 和 `register-ui-stitch.sh`，不动 `.claude/skills/`。
 
 不会动：`.planning/design/`（包括 design-config.json 和你的 DESIGN.md）、`.planning/config.json` 里的 `workflow.ui_phase`。
 
@@ -336,6 +359,6 @@ bash install.sh /path/to/project --uninstall
 1. 取得新版本的包（再次克隆，或更新你已有的副本），读 `CHANGELOG.md`。
 2. 先预览：`bash install.sh /path/to/project --dry-run`。
 3. 重新运行安装。重新安装会重新注册能力（版本升级也一样处理，`capability.json` 里的 `version` 跟随 `VERSION`；已启用且内容相同时什么都不改）。如果你改过已安装的 skill 文件，会看到 `CONFLICT:` 并以退出码 3 拒绝；确认可以丢弃本地修改时加 `--force`。
-4. 已安装的版本号在 `.claude/skills/.gsd-stitch-design-version`。
+4. 已安装的版本号在 `.claude/skills/.gsd-stitch-design-version`（Cursor：`.cursor/skills/.gsd-stitch-design-version`）。
 5. `design-config.json` 永远不会被覆盖：新版本加了字段时，把 `templates/design-config.json` 与你的文件对一下，手工补上。
 6. 想确认包本身没问题，运行自检：`bash test/install.test.sh`，最后一行应为 `ALL TESTS PASSED`。

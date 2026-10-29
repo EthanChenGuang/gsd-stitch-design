@@ -1,0 +1,38 @@
+---
+description: GSD Stitch Design workflow for Cursor. Replaces GSD's default UI step with gsd-ui-stitch-phase, including the GSD 1.19.0 UI-SPEC skip workaround.
+alwaysApply: true
+---
+
+# UI Design Workflow (gsd-stitch-design, Cursor)
+
+In this project, `gsd-ui-stitch-phase` **replaces** `gsd-ui-phase` everywhere GSD would normally run the UI step.
+
+## When to run it
+
+- When a GSD workflow or status output recommends `gsd-ui-phase {N}` (`gsd-next`, `gsd-progress`, the "Next Up" block after `gsd-discuss-phase`, or the UI gate before `gsd-plan-phase`), run `gsd-ui-stitch-phase {N}` instead and say so. It calls `gsd-ui-phase` internally, then adds the global design check, screen generation (Google Stitch) and export.
+- If the user types `gsd-ui-phase` directly, ask whether they want the full `gsd-ui-stitch-phase` flow or only the UI-SPEC (no screen generation).
+- The pack registers the GSD capability `ui-stitch`, so `gsd-plan-phase` and `gsd-autonomous` dispatch `gsd-ui-stitch-phase` after `gsd-ui-phase` for frontend phases (`plan:pre`). When both skills are dispatched, run each as dispatched. Turn it off with `workflow.ui_stitch=false`.
+
+## GSD 1.19.0 UI-SPEC skip workaround
+
+GSD Core for Cursor 1.19.0 skips **all** `plan:pre` UI step hooks when a `{NN}-UI-SPEC.md` already exists (`hasUiSpec: true` in `gsd_run check ui-plan-gate`). That also skips `gsd-ui-stitch-phase`, so screen designs never get generated.
+
+**If `{NN}-UI-SPEC.md` exists and `{NN}-SCREENS.md` is missing, still run `gsd-ui-stitch-phase {N}`.** Do this for `gsd-plan-phase`, `gsd-autonomous`, and any "UI already done, continue planning" path. The skill's hook entry skips UI-SPEC generation, runs the token-consistency check (B'), then continues from the screen list (C).
+
+Do not treat a missing `SCREENS.md` as optional when `workflow.ui_stitch` is true.
+
+## Cursor runtime
+
+- Resolve GSD with `.cursor/bin/gsd-run` (prefers `.cursor/gsd-core` over `.claude/gsd-core`).
+- Stitch MCP lives in `.cursor/mcp.json` as server `Google_Stitch` (`https://stitch.googleapis.com/mcp`, header `X-Goog-Api-Key: ${env:STITCH_API_KEY}`). Never commit the key. Create it at https://stitch.withgoogle.com/settings (API Keys) from the Google account that owns the project's Stitch project. Cloud agents: set `STITCH_API_KEY` as a Cursor Cloud Agents secret at https://cursor.com/dashboard?tab=cloud-agents.
+- Call Stitch tools through Cursor MCP (`GetDynamicTools` / `CallDynamicTool`, namespace `Google_Stitch`). Do not use Claude-only tools (`mcp__Google_Stitch__*`, `ToolSearch`, `AskUserQuestion`, `SendUserFile`, `Agent`).
+- Project-specific values live in `.planning/design/design-config.json`. Do not hardcode product names, Stitch project ids, or design-system ids in skills.
+- Default renderer for Cursor installs is `stitch`. If Stitch is not connected, **stop** — do not silently fall back to the html renderer.
+- When no interactive user is available (headless / Cursor cloud agent), every question is: stop, commit and push current state, and report the exact question, options, and recommended option. Never silently pick a non-recommended path.
+
+## Design rules
+
+- The project-wide design system is `.planning/design/DESIGN.md` (single source for tokens). Never change tokens inside a phase. Change them only through the skill's global-change step (G4).
+- To find a starting template, run `gsd-ui-design-pick`. It picks a DESIGN.md from VoltAgent/awesome-design-md, then hands the pick to `gsd-ui-stitch-phase` for review, de-branding and locking. Never lock a template as-is.
+- Keep `workflow.ui_phase` set to `true` in `.planning/config.json`. `gsd-ui-stitch-phase` depends on `gsd-ui-phase`, which exits early when that flag is off.
+- Per-phase designs live in `.planning/phases/{NN}-{slug}/design/` (`manifest.json` plus html and png). Planners cite the relevant screens; executors match the screenshots; tokens come from DESIGN.md; copy and states come from the phase UI-SPEC.

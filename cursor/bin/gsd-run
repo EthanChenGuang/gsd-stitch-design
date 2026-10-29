@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+# gsd-stitch-design Cursor shim.
+# Prefers the project's GSD Core for Cursor over a Claude copy, then PATH.
+# Installed to .cursor/bin/gsd-run. Skills invoke this so each bash block
+# resolves GSD the same way (Cursor runs every fenced block in a fresh shell).
+set -e
+# Follow symlinks so a copied/linked shim still finds sibling ../gsd-core.
+src="$0"
+while [ -h "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in
+    /*) ;;
+    *) src="$dir/$src" ;;
+  esac
+done
+shim_dir="$(cd -P "$(dirname "$src")" && pwd)"
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+tools=""
+# 1) GSD next to this shim (.cursor/bin/../gsd-core) — works even if cwd is not the project
+if [ -f "$shim_dir/../gsd-core/bin/gsd-tools.cjs" ]; then
+  tools="$shim_dir/../gsd-core/bin/gsd-tools.cjs"
+elif [ -f "$root/.cursor/gsd-core/bin/gsd-tools.cjs" ]; then
+  tools="$root/.cursor/gsd-core/bin/gsd-tools.cjs"
+elif [ -f "$root/.claude/gsd-core/bin/gsd-tools.cjs" ]; then
+  tools="$root/.claude/gsd-core/bin/gsd-tools.cjs"
+elif [ -f "${CURSOR_CONFIG_DIR:-$HOME/.cursor}/gsd-core/bin/gsd-tools.cjs" ]; then
+  tools="${CURSOR_CONFIG_DIR:-$HOME/.cursor}/gsd-core/bin/gsd-tools.cjs"
+elif [ -f "${HOME:-/nonexistent}/.claude/gsd-core/bin/gsd-tools.cjs" ]; then
+  tools="$HOME/.claude/gsd-core/bin/gsd-tools.cjs"
+fi
+if [ -n "$tools" ]; then
+  exec node "$tools" "$@"
+fi
+if command -v gsd_run >/dev/null 2>&1; then
+  exec gsd_run "$@"
+fi
+echo "ERROR: GSD was not found. Install GSD Core for Cursor: npx -y @opengsd/gsd-core@latest --cursor --local" >&2
+exit 1
